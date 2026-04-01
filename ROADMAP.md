@@ -7,13 +7,11 @@
     ↓
 Telegram Bot
     ↓
-Orchestrator (Claude Sonnet 4.6) — 调度 + 工具调用
+Orchestrator (Claude Sonnet 4.6) — 对话 + 工具调度
     ↓              ↓              ↓
 IBKR 报表模块   新闻模块      仓位操作模块
-    ↓
-Analyzer (Claude Opus 4.6) — 深度分析 + 结论
-    ↓
-格式化输出 → Telegram
+                                  ↓
+                      Analyzer (Claude Opus 4.6) — 深度分析（Phase 3+）
 ```
 
 ---
@@ -28,31 +26,45 @@ Analyzer (Claude Opus 4.6) — 深度分析 + 结论
 - [x] 生成 HTML 报告文件（纯 Python，深色主题）
 - [x] Telegram Bot `/report` 命令 → 发送 HTML 文件
 
-### Phase 2 — 新闻解读 (当前)
+### Phase 2 — AI 对话 + 持仓工具 ✅
+**目标**：与 Claude Sonnet 自由对话，按需自动调取持仓数据
+
+- [x] `agent/tools.py`：工具注册表（TOOL_DEFINITIONS + execute_tool），可扩展
+- [x] `agent/orchestrator.py`：Sonnet 对话循环，滑动窗口历史（MAX_HISTORY=20），tool use 自动循环，每次返回 token 用量
+- [x] `bot/telegram_bot.py`：MessageHandler 接收普通消息，per-user 对话历史（内存），`/clear` 命令清除历史
+- [x] `/report` 命令保留，直接获取 HTML 不走 AI
+- [x] 每次回复后显示 token 用量和费用（美元）
+- [x] 回复 HTML 解析失败时自动降级为纯文本
+
+**历史管理策略**：
+- 滑动窗口：保留最近 20 条，裁剪时确保从普通 user 消息开始（不破坏 tool_use/tool_result 配对）
+- 重启后历史清空（内存存储）
+- 跨天持久化 + 日摘要压缩待 Phase 5 实现
+
+**定价（Sonnet 4.6）**：$3.00 / 1M input tokens，$15.00 / 1M output tokens
+
+### Phase 3 — 新闻解读
 **目标**：对持仓标的做新闻分析
 
-- [ ] 集成 Web Search 工具（用 Claude 内置）
-- [ ] 针对每个持仓抓取相关新闻
+- [ ] 选型并集成新闻/搜索 API（Tavily / yfinance / Serper）
+- [ ] 新增 `get_news` 工具（加入 tools.py 注册表）
 - [ ] Opus 做影响分析：利好/利空/中性
-- [ ] Telegram `/news AAPL` 命令
+- [ ] 支持自然语言触发（"帮我看看腾讯最近有什么新闻"）
 
-### Phase 3 — 风险分析
+### Phase 4 — 风险分析
 **目标**：Opus 对整体仓位做深度风险评估
 
-- [ ] 集中度分析（单标的占比）
-- [ ] 板块分布分析
-- [ ] 历史回撤估算
+- [ ] 新增 `get_risk_analysis` 工具
+- [ ] 集中度分析（单标的占比）、板块分布、历史回撤估算
 - [ ] Telegram `/risk` 命令
 
-### Phase 4 — 多模型 Orchestration
-**目标**：Sonnet 调度，Opus 分析，分工明确
+### Phase 5 — 跨天记忆
+**目标**：对话历史持久化，重启不丢失
 
-- [ ] 重构为 Sonnet 做工具调度
-- [ ] Opus 专注深度分析
-- [ ] 对话式交互（自由提问）
-- [ ] 上下文记忆（多轮对话）
+- [ ] 历史序列化存储（SQLite 或 JSON 文件）
+- [ ] 超长历史摘要压缩（调用 Sonnet 生成日摘要，作为 system prompt 背景）
 
-### Phase 5 — 仓位操作（慎重）
+### Phase 6 — 仓位操作（慎重）
 **目标**：支持下单，三层确认机制
 
 - [ ] TWS API 连接（ib_insync）
@@ -60,7 +72,7 @@ Analyzer (Claude Opus 4.6) — 深度分析 + 结论
 - [ ] Telegram 确认按钮（inline keyboard）
 - [ ] 操作日志审计
 
-### Phase 6 — 定时任务 + 主动推送
+### Phase 7 — 定时任务 + 主动推送
 **目标**：自动化，无需手动触发
 
 - [ ] 每日早间报告（开盘前）
@@ -73,7 +85,7 @@ Analyzer (Claude Opus 4.6) — 深度分析 + 结论
 ## 文件结构
 
 ```
-ibkr-agent/
+FinanceBro/
 ├── main.py                 # 入口
 ├── config.py               # 配置（从 .env 读取）
 ├── requirements.txt
@@ -81,21 +93,25 @@ ibkr-agent/
 │
 ├── ibkr/
 │   ├── flex_query.py       # Flex Query 报表获取
-│   ├── tws_client.py       # Phase 5: TWS 实时连接
+│   ├── parser.py           # XML 解析 → 结构化数据
+│   ├── tws_client.py       # Phase 6: TWS 实时连接
 │   └── models.py           # 数据模型
 │
-├── agent/
-│   ├── formatter.py        # Sonnet: 数据格式化
-│   ├── analyzer.py         # Phase 3+: Opus 深度分析
-│   ├── orchestrator.py     # Phase 4+: Sonnet 多工具调度
-│   └── tools.py            # Phase 4+: 工具定义
+├── report/                 # 报告输出层（纯 Python，不含 AI）
+│   ├── html_report.py      # HTML 报告生成
+│   └── formatter.py        # Telegram 文本格式化
+│
+├── agent/                  # AI 层
+│   ├── tools.py            # 工具注册表（扩展新工具只改这里）
+│   ├── orchestrator.py     # Sonnet 对话引擎（tool use 循环）
+│   └── analyzer.py         # Phase 4+: Opus 深度分析
 │
 ├── bot/
-│   ├── telegram_bot.py     # Bot 主逻辑
-│   └── keyboards.py        # Phase 5: 确认按钮
+│   ├── telegram_bot.py     # Bot 主逻辑（命令 + 消息处理）
+│   └── keyboards.py        # Phase 6: 确认按钮
 │
 └── scheduler/
-    └── tasks.py            # Phase 6: 定时任务
+    └── tasks.py            # Phase 7: 定时任务
 ```
 
 ---
@@ -104,8 +120,8 @@ ibkr-agent/
 
 | 任务 | 模型 | 理由 |
 |------|------|------|
-| 工具调度 / 参数提取 | claude-sonnet-4-6 | 够用，省钱 |
-| 数据格式化 | claude-sonnet-4-6 | 结构化任务 |
+| 对话 / 工具调度 | claude-sonnet-4-6 | 够用，省钱 |
+| 数据格式化 / HTML 生成 | 纯 Python | 确定性输出，无需 AI |
 | 风险分析 / 新闻解读 | claude-opus-4-6 | 需要深度推理 |
 | 交易决策建议 | claude-opus-4-6 + thinking | 最高质量 |
 

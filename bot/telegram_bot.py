@@ -1,24 +1,32 @@
 """
-Telegram Bot — Phase 1
+Telegram Bot — Phase 2
 
 命令：
   /start   — 显示帮助
-  /report  — 获取 IBKR 持仓报告
+  /report  — 直接获取 IBKR 持仓 HTML 报告（不走 AI，省 token）
+  /clear   — 清除当前对话历史
+
+普通消息：
+  直接发送任意文字 → 与 Claude Sonnet 对话，按需自动调取持仓数据
 """
 
 import logging
 import tempfile
 import os
 from telegram import Update
-from telegram.ext import Application, CommandHandler, ContextTypes
+from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
 from telegram.constants import ParseMode
 from telegram.error import BadRequest
 
 from config import TELEGRAM_BOT_TOKEN, TELEGRAM_ALLOWED_USERS
 from ibkr.flex_query import fetch_flex_report
-from agent.html_report import build_html_file
+from report.html_report import build_html_file
+from agent.orchestrator import chat
 
 logger = logging.getLogger(__name__)
+
+# 每个用户的对话历史，key 为 user_id，重启后清空
+_histories: dict[int, list[dict]] = {}
 
 
 def _is_allowed(user_id: int) -> bool:
@@ -33,9 +41,10 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
     await update.message.reply_text(
         "👋 <b>FinanceBro</b> 已就绪\n\n"
-        "📋 <b>可用命令</b>\n"
-        "/report — 获取当前持仓报告\n\n"
-        "<i>更多功能陆续开放...</i>",
+        "💬 <b>直接发消息</b>即可与 AI 对话，可询问持仓、盈亏分析等\n\n"
+        "📋 <b>命令</b>\n"
+        "/report — 直接获取持仓 HTML 报告\n"
+        "/clear  — 清除对话历史",
         parse_mode=ParseMode.HTML,
     )
 
@@ -47,19 +56,14 @@ async def cmd_report(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
         await update.message.reply_text("⛔ 未授权")
         return
 
-    # 发送等待提示
     status_msg = await update.message.reply_text("⏳ 正在从 IBKR 获取报告，请稍候...")
 
     try:
-        # 1. 获取原始数据
         raw_data = fetch_flex_report()
-
-        # 2. 生成 HTML 文件
         report_date = raw_data.get("report_date", "report").replace("-", "")
         tmp_path = os.path.join(tempfile.gettempdir(), f"ibkr_report_{report_date}.html")
         build_html_file(raw_data, tmp_path)
 
-        # 3. 删除等待消息，发送 HTML 文件
         await status_msg.delete()
         with open(tmp_path, "rb") as f:
             await update.message.reply_document(
@@ -77,8 +81,83 @@ async def cmd_report(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
         )
 
 
+async def cmd_clear(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    user_id = update.effective_user.id
+
+    if not _is_allowed(user_id):
+        await update.message.reply_text("⛔ 未授权")
+        return
+
+    _histories.pop(user_id, None)
+    await update.message.reply_text("🗑 对话历史已清除")
+
+
+async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    user_id = update.effective_user.id
+
+    if not _is_allowed(user_id):
+        await update.message.reply_text("⛔ 未授权")
+        return
+
+    user_text = update.message.text.strip()
+    if not user_text:
+        return
+
+    # 发送"正在输入"状态
+    await context.bot.send_chat_action(
+        chat_id=update.effective_chat.id,
+        action="typing",
+    )
+
+    history = _histories.get(user_id, [])
+
+    try:
+        reply, history, usage = chat(history, user_text)
+        _histories[user_id] = history
+
+        # 超长消息分段发送，HTML 解析失败时降级为纯文本
+        for chunk in _split(reply):
+            try:
+                await update.message.reply_text(chunk, parse_mode=ParseMode.HTML)
+            except BadRequest:
+                await update.message.reply_text(chunk)
+
+        await update.message.reply_text(
+            f"<i>📊 {usage['input_tokens']:,} in · {usage['output_tokens']:,} out"
+            f" · ${usage['cost_usd']:.4f}</i>",
+            parse_mode=ParseMode.HTML,
+        )
+
+    except Exception as e:
+        logger.exception(f"对话处理失败：{e}")
+        await update.message.reply_text(
+            f"❌ <b>出错了</b>\n<code>{str(e)}</code>",
+            parse_mode=ParseMode.HTML,
+        )
+
+
+def _split(text: str, limit: int = 4000) -> list[str]:
+    """超长消息按段落切分。"""
+    if len(text) <= limit:
+        return [text]
+
+    parts, current = [], ""
+    for para in text.split("\n\n"):
+        if len(current) + len(para) + 2 <= limit:
+            current = current + ("\n\n" if current else "") + para
+        else:
+            if current:
+                parts.append(current)
+            current = para
+    if current:
+        parts.append(current)
+    return parts
+
+
 def build_app() -> Application:
     app = Application.builder().token(TELEGRAM_BOT_TOKEN).build()
     app.add_handler(CommandHandler("start", cmd_start))
     app.add_handler(CommandHandler("report", cmd_report))
+    app.add_handler(CommandHandler("clear", cmd_clear))
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
     return app
