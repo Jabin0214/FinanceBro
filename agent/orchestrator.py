@@ -37,8 +37,10 @@ SYSTEM_PROMPT = """你是 FinanceBro，用户的私人投资助手。
 
 
 # Sonnet 4.6 定价（美元 / token）
-_INPUT_PRICE_PER_TOKEN  = 3.0  / 1_000_000
-_OUTPUT_PRICE_PER_TOKEN = 15.0 / 1_000_000
+_PRICE_INPUT         = 3.0   / 1_000_000
+_PRICE_CACHE_WRITE   = 3.75  / 1_000_000  # 写入缓存：比普通贵 25%
+_PRICE_CACHE_READ    = 0.30  / 1_000_000  # 读取缓存：比普通便宜 90%
+_PRICE_OUTPUT        = 15.0  / 1_000_000
 
 
 def chat(history: list[dict], user_message: str) -> tuple[str, list[dict], dict]:
@@ -49,7 +51,7 @@ def chat(history: list[dict], user_message: str) -> tuple[str, list[dict], dict]
     history 格式为 Anthropic messages 列表，由调用方维护和存储。
     """
     history = history + [{"role": "user", "content": user_message}]
-    total_input = total_output = 0
+    total_input = total_cache_write = total_cache_read = total_output = 0
 
     while True:
         trimmed = _trim(history)
@@ -57,25 +59,23 @@ def chat(history: list[dict], user_message: str) -> tuple[str, list[dict], dict]
         response = client.messages.create(
             model=ORCHESTRATOR_MODEL,
             max_tokens=2048,
-            system=SYSTEM_PROMPT,
+            system=[{"type": "text", "text": SYSTEM_PROMPT, "cache_control": {"type": "ephemeral"}}],
             tools=TOOL_DEFINITIONS,
             messages=trimmed,
         )
 
-        total_input  += response.usage.input_tokens
-        total_output += response.usage.output_tokens
+        u = response.usage
+        total_input       += u.input_tokens
+        total_cache_write += getattr(u, "cache_creation_input_tokens", 0) or 0
+        total_cache_read  += getattr(u, "cache_read_input_tokens", 0) or 0
+        total_output      += u.output_tokens
 
         if response.stop_reason == "end_turn":
             reply = next(
                 (b.text for b in response.content if hasattr(b, "text")), ""
             )
             history = history + [{"role": "assistant", "content": reply}]
-            usage = {
-                "input_tokens": total_input,
-                "output_tokens": total_output,
-                "cost_usd": total_input * _INPUT_PRICE_PER_TOKEN + total_output * _OUTPUT_PRICE_PER_TOKEN,
-            }
-            return reply, _trim(history), usage
+            return reply, _trim(history), _calc_usage(total_input, total_cache_write, total_cache_read, total_output)
 
         if response.stop_reason == "tool_use":
             assistant_blocks = [b.model_dump() for b in response.content]
@@ -103,12 +103,23 @@ def chat(history: list[dict], user_message: str) -> tuple[str, list[dict], dict]
         logger.warning(f"意外的 stop_reason: {response.stop_reason}")
         reply = "".join(b.text for b in response.content if hasattr(b, "text"))
         history = history + [{"role": "assistant", "content": reply or "(无回复)"}]
-        usage = {
-            "input_tokens": total_input,
-            "output_tokens": total_output,
-            "cost_usd": total_input * _INPUT_PRICE_PER_TOKEN + total_output * _OUTPUT_PRICE_PER_TOKEN,
-        }
-        return reply or "(无回复)", _trim(history), usage
+        return reply or "(无回复)", _trim(history), _calc_usage(total_input, total_cache_write, total_cache_read, total_output)
+
+
+def _calc_usage(input_tokens: int, cache_write: int, cache_read: int, output_tokens: int) -> dict:
+    cost = (
+        input_tokens  * _PRICE_INPUT +
+        cache_write   * _PRICE_CACHE_WRITE +
+        cache_read    * _PRICE_CACHE_READ +
+        output_tokens * _PRICE_OUTPUT
+    )
+    return {
+        "input_tokens": input_tokens,
+        "cache_write_tokens": cache_write,
+        "cache_read_tokens": cache_read,
+        "output_tokens": output_tokens,
+        "cost_usd": cost,
+    }
 
 
 def _trim(history: list[dict]) -> list[dict]:

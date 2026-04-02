@@ -12,8 +12,14 @@
 
 import json
 import logging
+import time
 
 logger = logging.getLogger(__name__)
+
+# 持仓数据本地缓存
+_portfolio_cache: dict | None = None
+_portfolio_cache_ts: float = 0.0
+_PORTFOLIO_CACHE_TTL = 600  # 10 分钟
 
 # ── 工具 Schema（发给 Claude） ─────────────────────────────────────────────────
 
@@ -49,7 +55,16 @@ def execute_tool(name: str, tool_input: dict) -> str:
 
 
 def _get_portfolio() -> str:
+    global _portfolio_cache, _portfolio_cache_ts
     from ibkr.flex_query import fetch_flex_report
+
+    now = time.time()
+    if _portfolio_cache and now - _portfolio_cache_ts < _PORTFOLIO_CACHE_TTL:
+        logger.info("工具调用: get_portfolio — 使用缓存数据（剩余 %.0fs）", _PORTFOLIO_CACHE_TTL - (now - _portfolio_cache_ts))
+        return json.dumps(_portfolio_cache, ensure_ascii=False)
+
     logger.info("工具调用: get_portfolio — 正在从 IBKR 获取数据...")
     data = fetch_flex_report()
-    return json.dumps(data, ensure_ascii=False, indent=2)
+    _portfolio_cache = data
+    _portfolio_cache_ts = time.time()
+    return json.dumps(data, ensure_ascii=False)

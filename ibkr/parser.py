@@ -86,7 +86,7 @@ def _parse_statement(stmt: ET.Element) -> dict:
     fx_rates = _parse_fx_rates(stmt)
 
     # ---- 2. 持仓 ----
-    positions = _parse_positions(stmt, fx_rates)
+    positions = _parse_positions(stmt)
 
     # ---- 3. 现金 ----
     cash_balances, cash_base_total = _parse_cash(stmt, fx_rates)
@@ -131,12 +131,7 @@ def _parse_fx_rates(stmt: ET.Element) -> dict[str, float]:
     return rates
 
 
-def _get_fx_to_base(fx_rates: dict, currency: str, pos_fx_rate: float) -> float:
-    """从持仓的 fxRateToBase 字段直接读取，最准确。"""
-    return pos_fx_rate if pos_fx_rate else 1.0
-
-
-def _parse_positions(stmt: ET.Element, fx_rates: dict) -> list[dict]:
+def _parse_positions(stmt: ET.Element) -> list[dict]:
     positions = []
     for pos in stmt.findall(".//OpenPosition"):
         # levelOfDetail: SUMMARY 是每个标的聚合持仓，这正是我们需要的

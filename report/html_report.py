@@ -216,140 +216,111 @@ def _render_html(data: dict) -> str:
 <title>IBKR Portfolio Report {escape(report_date)}</title>
 <style>
   :root {{
-    --bg: #f4efe6;
-    --paper: #fffdf8;
-    --paper-strong: #fffaf1;
-    --ink: #172033;
-    --muted: #6d7788;
-    --line: #ddd1bc;
-    --accent: #1d5b4f;
-    --accent-soft: #e0efe8;
-    --warn: #b7791f;
-    --warn-soft: #fff4de;
-    --danger: #b1453b;
-    --danger-soft: #fce9e4;
+    --bg: #f6f3ee;
+    --card: #ffffff;
+    --ink: #18212f;
+    --muted: #697386;
+    --line: #e5ddd0;
+    --accent: #183f63;
     --good: #1f7a57;
-    --good-soft: #e7f5ee;
-    --shadow: 0 18px 40px rgba(42, 36, 27, 0.08);
+    --warn: #b7791f;
+    --danger: #b1453b;
   }}
   * {{ box-sizing: border-box; }}
   body {{
     margin: 0;
-    font-family: Georgia, "Times New Roman", serif;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
     color: var(--ink);
-    background:
-      radial-gradient(circle at top right, rgba(29, 91, 79, 0.10), transparent 24%),
-      linear-gradient(180deg, #f8f4ec 0%, var(--bg) 100%);
+    background: var(--bg);
   }}
   .page {{
-    max-width: 1240px;
+    max-width: 1180px;
     margin: 0 auto;
-    padding: 32px 20px 56px;
+    padding: 24px 16px 40px;
   }}
   .hero {{
-    background: linear-gradient(135deg, rgba(255,253,248,0.96), rgba(247,240,229,0.92));
-    border: 1px solid rgba(221, 209, 188, 0.9);
-    border-radius: 28px;
-    padding: 28px;
-    box-shadow: var(--shadow);
-    margin-bottom: 22px;
+    background: var(--card);
+    border: 1px solid var(--line);
+    border-radius: 20px;
+    padding: 20px;
+    margin-bottom: 16px;
   }}
   .eyebrow {{
     color: var(--accent);
-    letter-spacing: 0.10em;
+    letter-spacing: 0.08em;
     text-transform: uppercase;
     font-size: 12px;
-    font-weight: 700;
-    margin-bottom: 8px;
+    font-weight: 600;
+    margin-bottom: 6px;
   }}
   h1 {{
     margin: 0;
-    font-size: clamp(30px, 4vw, 48px);
-    line-height: 1.06;
+    font-size: clamp(26px, 4vw, 40px);
+    line-height: 1.1;
     font-weight: 700;
   }}
   .hero-copy {{
     display: grid;
-    grid-template-columns: 2fr 1fr;
-    gap: 20px;
-    margin-top: 18px;
+    grid-template-columns: 1.6fr 1fr;
+    gap: 16px;
+    margin-top: 14px;
     align-items: start;
   }}
   .hero p {{
     margin: 0;
     color: var(--muted);
-    font-size: 16px;
-    line-height: 1.7;
+    font-size: 15px;
+    line-height: 1.6;
   }}
   .hero-meta {{
-    background: rgba(255,255,255,0.55);
-    border: 1px solid rgba(221, 209, 188, 0.9);
-    border-radius: 20px;
-    padding: 16px 18px;
+    background: #faf8f4;
+    border: 1px solid var(--line);
+    border-radius: 16px;
+    padding: 12px 14px;
   }}
   .meta-row {{
     display: flex;
     justify-content: space-between;
-    gap: 16px;
-    font-size: 14px;
-    padding: 8px 0;
-    border-bottom: 1px solid rgba(221, 209, 188, 0.85);
+    gap: 12px;
+    font-size: 13px;
+    padding: 7px 0;
+    border-bottom: 1px solid var(--line);
   }}
   .meta-row:last-child {{ border-bottom: none; }}
   .meta-label {{ color: var(--muted); }}
   .section {{
-    background: var(--paper);
+    background: var(--card);
     border: 1px solid var(--line);
-    border-radius: 24px;
-    padding: 24px;
-    box-shadow: var(--shadow);
-    margin-bottom: 18px;
+    border-radius: 20px;
+    padding: 18px;
+    margin-bottom: 16px;
   }}
   .section-title {{
-    margin: 0 0 6px;
-    font-size: 24px;
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    flex-wrap: wrap;
-  }}
-  .section-subtitle {{
-    margin: 0 0 20px;
-    color: var(--muted);
-    line-height: 1.6;
-    font-size: 14px;
+    margin: 0 0 14px;
+    font-size: 18px;
   }}
   .grid {{
     display: grid;
-    gap: 16px;
+    gap: 12px;
   }}
   .metric-grid {{
     grid-template-columns: repeat(5, minmax(0, 1fr));
   }}
   .metric-card {{
     border: 1px solid var(--line);
-    border-radius: 18px;
-    padding: 18px;
-    background: linear-gradient(180deg, #fffdfa 0%, #f8f2e8 100%);
+    border-radius: 16px;
+    padding: 16px;
+    background: #faf8f4;
   }}
   .metric-label {{
-    display: flex;
-    align-items: center;
-    gap: 8px;
     color: var(--muted);
-    font-size: 13px;
-    margin-bottom: 12px;
+    font-size: 12px;
+    margin-bottom: 8px;
   }}
   .metric-value {{
-    font-size: clamp(24px, 3vw, 34px);
+    font-size: clamp(24px, 3vw, 32px);
     line-height: 1.1;
     font-weight: 700;
-    margin-bottom: 6px;
-  }}
-  .metric-note {{
-    font-size: 13px;
-    color: var(--muted);
-    line-height: 1.5;
   }}
   .positive {{ color: var(--good); }}
   .negative {{ color: var(--danger); }}
@@ -357,83 +328,57 @@ def _render_html(data: dict) -> str:
   .pill {{
     display: inline-flex;
     align-items: center;
-    gap: 6px;
     border-radius: 999px;
-    padding: 6px 10px;
-    font-size: 12px;
-    font-weight: 700;
+    padding: 4px 8px;
+    font-size: 11px;
+    font-weight: 600;
   }}
-  .pill.good {{ background: var(--good-soft); color: var(--good); }}
-  .pill.warn {{ background: var(--warn-soft); color: var(--warn); }}
-  .pill.danger {{ background: var(--danger-soft); color: var(--danger); }}
-  .insight-box {{
-    background: linear-gradient(135deg, rgba(29,91,79,0.10), rgba(255,255,255,0.72));
-    border: 1px solid rgba(29,91,79,0.18);
-    border-radius: 22px;
-    padding: 20px;
-    margin-top: 18px;
-  }}
-  .insight-title {{
-    font-size: 13px;
-    text-transform: uppercase;
-    letter-spacing: 0.08em;
-    color: var(--accent);
-    margin-bottom: 10px;
-    font-weight: 700;
-  }}
-  .insight-copy {{
-    font-size: 18px;
-    line-height: 1.7;
-    margin: 0;
-  }}
+  .pill.good {{ background: #eaf5ef; color: var(--good); }}
+  .pill.warn {{ background: #fff4de; color: var(--warn); }}
+  .pill.danger {{ background: #fce9e4; color: var(--danger); }}
   .risk-list {{
     display: grid;
     grid-template-columns: repeat(3, minmax(0, 1fr));
-    gap: 14px;
+    gap: 12px;
   }}
   .risk-card {{
-    border-radius: 18px;
-    padding: 18px;
+    border-radius: 16px;
+    padding: 14px;
     border: 1px solid var(--line);
+    background: #faf8f4;
   }}
-  .risk-card.good {{ background: var(--good-soft); border-color: rgba(31, 122, 87, 0.18); }}
-  .risk-card.warn {{ background: var(--warn-soft); border-color: rgba(183, 121, 31, 0.18); }}
-  .risk-card.danger {{ background: var(--danger-soft); border-color: rgba(177, 69, 59, 0.18); }}
+  .risk-card.good {{ border-color: #d7eadf; }}
+  .risk-card.warn {{ border-color: #efd8ad; }}
+  .risk-card.danger {{ border-color: #edc3bc; }}
   .risk-title {{
-    margin: 0 0 8px;
-    font-size: 17px;
+    margin: 10px 0 6px;
+    font-size: 15px;
   }}
   .risk-copy {{
-    margin: 0 0 10px;
-    line-height: 1.6;
-    font-size: 14px;
-  }}
-  .risk-footnote {{
-    color: var(--muted);
+    margin: 0;
+    line-height: 1.5;
     font-size: 13px;
-    line-height: 1.55;
   }}
   .alloc-grid {{
-    grid-template-columns: 1.2fr 1fr;
-    align-items: start;
+    grid-template-columns: 1fr;
   }}
   .bars {{
     display: grid;
-    gap: 14px;
+    gap: 12px;
   }}
   .bar-row {{
     display: grid;
-    gap: 8px;
+    gap: 6px;
   }}
   .bar-head {{
     display: flex;
     justify-content: space-between;
     gap: 10px;
-    font-size: 14px;
+    font-size: 13px;
   }}
   .bar-track {{
-    height: 14px;
-    background: #efe3cf;
+    height: 12px;
+    background: #ede7dd;
     border-radius: 999px;
     overflow: hidden;
   }}
@@ -441,114 +386,35 @@ def _render_html(data: dict) -> str:
     height: 100%;
     border-radius: inherit;
   }}
-  .bar-fill.equity {{ background: linear-gradient(90deg, #1d5b4f, #3f8d74); }}
-  .bar-fill.cash {{ background: linear-gradient(90deg, #b7791f, #d8a754); }}
-  .bar-fill.other {{ background: linear-gradient(90deg, #7f6a53, #ab947b); }}
-  .helper-list {{
-    display: grid;
-    gap: 12px;
-  }}
-  .helper-card {{
-    border: 1px solid var(--line);
-    border-radius: 18px;
-    padding: 16px;
-    background: var(--paper-strong);
-  }}
-  .helper-card h3 {{
-    margin: 0 0 8px;
-    font-size: 17px;
-  }}
-  .helper-card p {{
-    margin: 0;
-    color: var(--muted);
-    line-height: 1.6;
-    font-size: 14px;
-  }}
-  .action-grid {{
-    grid-template-columns: repeat(3, minmax(0, 1fr));
-  }}
-  .action-card {{
-    border-radius: 18px;
-    padding: 18px;
-    border: 1px solid var(--line);
-    background: linear-gradient(180deg, #fffdfa 0%, #f9f2e6 100%);
-  }}
-  .action-card h3 {{
-    margin: 0 0 8px;
-    font-size: 18px;
-  }}
-  .action-card p {{
-    margin: 0 0 8px;
-    color: var(--muted);
-    line-height: 1.6;
-    font-size: 14px;
-  }}
-  .action-card strong {{
-    color: var(--ink);
-  }}
-  .spotlight-grid {{
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }}
-  .spotlight-card {{
-    border: 1px solid var(--line);
-    border-radius: 20px;
-    padding: 18px;
-    background: linear-gradient(180deg, #fffdfa 0%, #fbf5ea 100%);
-  }}
-  .spotlight-kicker {{
-    font-size: 12px;
-    text-transform: uppercase;
-    letter-spacing: 0.08em;
-    color: var(--muted);
-    margin-bottom: 10px;
-  }}
-  .spotlight-title {{
-    font-size: 24px;
-    margin: 0 0 6px;
-  }}
-  .spotlight-meta {{
-    color: var(--muted);
-    font-size: 14px;
-    line-height: 1.6;
-    margin-bottom: 14px;
-  }}
-  .spotlight-value {{
-    font-size: 28px;
-    line-height: 1.1;
-    font-weight: 700;
-    margin-bottom: 6px;
-  }}
-  .spotlight-note {{
-    color: var(--muted);
-    font-size: 14px;
-    line-height: 1.6;
-  }}
+  .bar-fill.equity {{ background: #224f7a; }}
+  .bar-fill.cash {{ background: #b7791f; }}
+  .bar-fill.other {{ background: #8a7762; }}
   .account-grid {{
-    grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
   }}
   .account-card {{
     border: 1px solid var(--line);
-    background: linear-gradient(180deg, #fffdfa 0%, #fbf5ea 100%);
-    border-radius: 20px;
-    padding: 18px;
+    background: #faf8f4;
+    border-radius: 16px;
+    padding: 14px;
   }}
   .account-name {{
-    font-size: 20px;
+    font-size: 18px;
     margin: 0 0 4px;
   }}
   .account-id {{
     color: var(--muted);
-    font-size: 13px;
-    margin-bottom: 16px;
+    font-size: 12px;
+    margin-bottom: 12px;
   }}
   .mini-grid {{
     display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: 12px;
+    gap: 10px;
   }}
   .mini-item {{
-    border-top: 1px solid rgba(221, 209, 188, 0.85);
-    padding-top: 10px;
+    border-top: 1px solid var(--line);
+    padding-top: 8px;
   }}
   .mini-label {{
     color: var(--muted);
@@ -556,7 +422,7 @@ def _render_html(data: dict) -> str:
     margin-bottom: 4px;
   }}
   .mini-value {{
-    font-size: 18px;
+    font-size: 16px;
     font-weight: 700;
     line-height: 1.3;
   }}
@@ -565,15 +431,15 @@ def _render_html(data: dict) -> str:
     border-collapse: collapse;
   }}
   th, td {{
-    padding: 12px 10px;
-    border-bottom: 1px solid rgba(221, 209, 188, 0.85);
+    padding: 10px 8px;
+    border-bottom: 1px solid var(--line);
     text-align: left;
     vertical-align: top;
-    font-size: 14px;
+    font-size: 13px;
   }}
   th {{
     color: var(--muted);
-    font-size: 12px;
+    font-size: 11px;
     text-transform: uppercase;
     letter-spacing: 0.06em;
   }}
@@ -583,111 +449,50 @@ def _render_html(data: dict) -> str:
   }}
   .symbol {{
     font-weight: 700;
-    font-size: 16px;
+    font-size: 14px;
   }}
   .desc {{
     color: var(--muted);
-    margin-top: 4px;
-    font-size: 13px;
-    line-height: 1.45;
+    margin-top: 3px;
+    font-size: 12px;
+    line-height: 1.4;
   }}
   .subline {{
     color: var(--muted);
-    font-size: 12px;
-    margin-top: 4px;
+    font-size: 11px;
+    margin-top: 3px;
   }}
   .table-wrap {{
     overflow-x: auto;
   }}
-  .tooltip-trigger {{
-    width: 18px;
-    height: 18px;
-    border-radius: 999px;
-    border: 1px solid rgba(29, 91, 79, 0.28);
-    background: rgba(29, 91, 79, 0.10);
-    color: var(--accent);
-    font-size: 11px;
-    font-weight: 700;
-    line-height: 1;
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    cursor: pointer;
-    padding: 0;
-  }}
-  .tooltip-trigger:hover {{
-    background: rgba(29, 91, 79, 0.16);
-  }}
-  .popover-backdrop {{
-    position: fixed;
-    inset: 0;
-    background: rgba(17, 24, 39, 0.34);
-    display: none;
-    align-items: center;
-    justify-content: center;
-    padding: 20px;
-    z-index: 1000;
-  }}
-  .popover-backdrop.open {{ display: flex; }}
-  .popover {{
-    width: min(420px, 100%);
-    background: #fffdf8;
-    border-radius: 20px;
-    border: 1px solid var(--line);
-    box-shadow: 0 24px 80px rgba(17, 24, 39, 0.20);
-    padding: 20px;
-  }}
-  .popover h3 {{
-    margin: 0 0 10px;
-    font-size: 20px;
-  }}
-  .popover p {{
-    margin: 0;
-    line-height: 1.7;
-    color: var(--muted);
-    font-size: 15px;
-  }}
-  .popover-close {{
-    margin-top: 16px;
-    border: none;
-    background: var(--accent);
-    color: white;
-    border-radius: 999px;
-    padding: 10px 14px;
-    cursor: pointer;
-    font-size: 13px;
-    font-weight: 700;
-  }}
   footer {{
     color: var(--muted);
     text-align: center;
-    padding-top: 8px;
-    font-size: 13px;
+    padding-top: 4px;
+    font-size: 12px;
   }}
   @media (max-width: 960px) {{
     .hero-copy,
     .alloc-grid,
-    .action-grid,
     .risk-list,
-    .spotlight-grid,
     .metric-grid {{
       grid-template-columns: 1fr;
     }}
   }}
   @media (max-width: 720px) {{
-    .page {{ padding: 18px 14px 40px; }}
+    .page {{ padding: 16px 12px 28px; }}
     .hero,
-    .section {{ padding: 18px; border-radius: 20px; }}
+    .section {{ padding: 14px; border-radius: 16px; }}
     .mini-grid {{ grid-template-columns: 1fr; }}
-    .metric-value {{ font-size: 28px; }}
+    .metric-value {{ font-size: 26px; }}
   }}
 </style>
 </head>
 <body>
   <div class="page">
     <section class="hero">
-      <div class="eyebrow">Portfolio Health Check</div>
-      <h1>一眼看懂你的 IBKR 账户现在怎么样</h1>
+      <div class="eyebrow">Consolidated Portfolio</div>
+      <h1>IBKR 账户总览</h1>
       <div class="hero-copy">
         <p>{escape(summary_sentence)}</p>
         <div class="hero-meta">
@@ -700,7 +505,7 @@ def _render_html(data: dict) -> str:
     </section>
 
     <section class="section">
-      <h2 class="section-title">账户体检总览</h2>
+      <h2 class="section-title">总览</h2>
       <div class="grid metric-grid">
         {_render_metric_card("总资产", _money(metrics["total_net"]), base_ccy)}
         {_render_metric_card("账面盈亏", _pnl_str(metrics["total_pnl"]), base_ccy, _sentiment_class(metrics["total_pnl"]))}
@@ -711,7 +516,7 @@ def _render_html(data: dict) -> str:
     </section>
 
     <section class="section">
-      <h2 class="section-title">风险提醒</h2>
+      <h2 class="section-title">风险</h2>
       <div class="risk-list">
         {risk_items}
       </div>
@@ -729,28 +534,28 @@ def _render_html(data: dict) -> str:
     </section>
 
     <section class="section">
-      <h2 class="section-title">账户快照</h2>
+      <h2 class="section-title">分账户</h2>
       <div class="grid account-grid">
         {account_cards}
       </div>
     </section>
 
     <section class="section">
-      <h2 class="section-title">最影响你的持仓</h2>
+      <h2 class="section-title">前五持仓</h2>
       <div class="table-wrap">
         {top_positions}
       </div>
     </section>
 
     <section class="section">
-      <h2 class="section-title">完整持仓明细</h2>
+      <h2 class="section-title">全部持仓</h2>
       <div class="table-wrap">
         {full_holdings}
       </div>
     </section>
 
     <section class="section">
-      <h2 class="section-title">现金与流动性</h2>
+      <h2 class="section-title">现金</h2>
       <div class="table-wrap">
         {cash_table}
       </div>
@@ -859,30 +664,18 @@ def _build_risk_items(metrics: dict) -> str:
     items = [
         {
             "level": metrics["top5_level"],
-            "title": "持仓是否过于集中",
-            "copy": (
-                f"你的前五大持仓合计占总资产 {_plain_pct(metrics['top5_concentration'])}。"
-                " 集中度越高，少数几只股票的波动就越会主导整体结果。"
-            ),
-            "note": metrics["top5_note"],
+            "title": "持仓集中度",
+            "copy": f"前五大持仓占比 {_plain_pct(metrics['top5_concentration'])}",
         },
         {
             "level": metrics["cash_ratio_level"],
-            "title": "现金缓冲够不够",
-            "copy": (
-                f"当前现金占比是 {_plain_pct(metrics['cash_ratio'])}。"
-                " 现金太少时，市场继续波动时的缓冲和补仓空间都会变小。"
-            ),
-            "note": metrics["cash_ratio_note"],
+            "title": "现金缓冲",
+            "copy": f"现金占比 {_plain_pct(metrics['cash_ratio'])}",
         },
         {
             "level": metrics["largest_position_level"],
-            "title": "是否过度依赖单一持仓",
-            "copy": (
-                f"你最大的单一持仓占总资产 {_plain_pct(metrics['largest_position_weight'])}。"
-                " 单一持仓越大，组合越容易被一只股票牵着走。"
-            ),
-            "note": metrics["largest_position_note"],
+            "title": "最大单一持仓",
+            "copy": f"最大持仓占比 {_plain_pct(metrics['largest_position_weight'])}",
         },
     ]
 
@@ -892,7 +685,6 @@ def _build_risk_items(metrics: dict) -> str:
           <div class="pill {item['level']}">{_level_label(item['level'])}</div>
           <h3 class="risk-title">{escape(item['title'])}</h3>
           <p class="risk-copy">{escape(item['copy'])}</p>
-          <div class="risk-footnote">{escape(item['note'])}</div>
         </article>
         """
         for item in items

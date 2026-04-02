@@ -10,6 +10,7 @@ Telegram Bot — Phase 2
   直接发送任意文字 → 与 Claude Sonnet 对话，按需自动调取持仓数据
 """
 
+import asyncio
 import logging
 import tempfile
 import os
@@ -65,13 +66,15 @@ async def cmd_report(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
         build_html_file(raw_data, tmp_path)
 
         await status_msg.delete()
-        with open(tmp_path, "rb") as f:
-            await update.message.reply_document(
-                document=f,
-                filename=f"ibkr_report_{report_date}.html",
-                caption=f"📊 IBKR 持仓报告 {raw_data.get('report_date', '')}",
-            )
-        os.remove(tmp_path)
+        try:
+            with open(tmp_path, "rb") as f:
+                await update.message.reply_document(
+                    document=f,
+                    filename=f"ibkr_report_{report_date}.html",
+                    caption=f"📊 IBKR 持仓报告 {raw_data.get('report_date', '')}",
+                )
+        finally:
+            os.remove(tmp_path)
 
     except Exception as e:
         logger.exception(f"获取报告失败：{e}")
@@ -103,16 +106,18 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     if not user_text:
         return
 
-    # 发送"正在输入"状态
-    await context.bot.send_chat_action(
-        chat_id=update.effective_chat.id,
-        action="typing",
-    )
-
     history = _histories.get(user_id, [])
 
+    # 持续发送 typing 状态（每 4s 刷新，直到 AI 回复完成）
+    stop_typing = asyncio.Event()
+    async def _keep_typing():
+        while not stop_typing.is_set():
+            await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="typing")
+            await asyncio.sleep(4)
+    typing_task = asyncio.create_task(_keep_typing())
+
     try:
-        reply, history, usage = chat(history, user_text)
+        reply, history, usage = await asyncio.to_thread(chat, history, user_text)
         _histories[user_id] = history
 
         # 超长消息分段发送，HTML 解析失败时降级为纯文本
@@ -122,9 +127,11 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
             except BadRequest:
                 await update.message.reply_text(chunk)
 
+        cache_hit = usage.get("cache_read_tokens", 0)
+        cache_hint = f" · 💾 {cache_hit:,} cached" if cache_hit else ""
         await update.message.reply_text(
             f"<i>📊 {usage['input_tokens']:,} in · {usage['output_tokens']:,} out"
-            f" · ${usage['cost_usd']:.4f}</i>",
+            f"{cache_hint} · ${usage['cost_usd']:.4f}</i>",
             parse_mode=ParseMode.HTML,
         )
 
@@ -134,6 +141,9 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
             f"❌ <b>出错了</b>\n<code>{str(e)}</code>",
             parse_mode=ParseMode.HTML,
         )
+    finally:
+        stop_typing.set()
+        typing_task.cancel()
 
 
 def _split(text: str, limit: int = 4000) -> list[str]:
