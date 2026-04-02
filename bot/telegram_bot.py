@@ -23,6 +23,7 @@ from config import TELEGRAM_BOT_TOKEN, TELEGRAM_ALLOWED_USERS
 from ibkr.flex_query import fetch_flex_report
 from report.html_report import build_html_file
 from agent.orchestrator import chat
+from agent.tools import pop_pending_files
 
 logger = logging.getLogger(__name__)
 
@@ -126,6 +127,18 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
                 await update.message.reply_text(chunk, parse_mode=ParseMode.HTML)
             except BadRequest:
                 await update.message.reply_text(chunk)
+
+        # 发送工具生成的文件（如 HTML 报表）
+        for f in pop_pending_files():
+            try:
+                with open(f["path"], "rb") as fh:
+                    await update.message.reply_document(
+                        document=fh,
+                        filename=f["filename"],
+                        caption=f["caption"],
+                    )
+            finally:
+                os.remove(f["path"])
 
         cache_hit = usage.get("cache_read_tokens", 0)
         cache_hint = f" · 💾 {cache_hit:,} cached" if cache_hit else ""
