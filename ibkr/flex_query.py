@@ -70,7 +70,16 @@ def _download_report(reference_code: str) -> str:
             logger.info("报表尚未生成，等待中...")
             continue
 
+        try:
+            root = ET.fromstring(resp.text)
+            status = root.findtext(".//Status")
+            if status and status != "Success":
+                error_msg = root.findtext(".//ErrorMessage") or resp.text
+                raise RuntimeError(f"Flex Query 下载失败：{error_msg}")
+        except ET.ParseError:
+            # 正常报表 XML 不一定带 Status，无法解析状态时交给后续 parser 处理
+            pass
+
         return resp.text
 
     raise RuntimeError("IBKR 报表下载超时，请稍后重试")
-

@@ -14,6 +14,7 @@ import asyncio
 import logging
 import tempfile
 import os
+from uuid import uuid4
 from telegram import Update
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
 from telegram.constants import ParseMode
@@ -23,7 +24,7 @@ from config import TELEGRAM_BOT_TOKEN, TELEGRAM_ALLOWED_USERS
 from ibkr.flex_query import fetch_flex_report
 from report.html_report import build_html_file
 from agent.orchestrator import chat
-from agent.tools import pop_pending_files
+from agent.tools import pop_pending_files, set_active_user, reset_active_user
 
 logger = logging.getLogger(__name__)
 
@@ -63,7 +64,10 @@ async def cmd_report(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
     try:
         raw_data = fetch_flex_report()
         report_date = raw_data.get("report_date", "report").replace("-", "")
-        tmp_path = os.path.join(tempfile.gettempdir(), f"ibkr_report_{report_date}.html")
+        tmp_path = os.path.join(
+            tempfile.gettempdir(),
+            f"ibkr_report_{report_date}_{user_id}_{uuid4().hex[:8]}.html",
+        )
         build_html_file(raw_data, tmp_path)
 
         await status_msg.delete()
@@ -118,7 +122,11 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     typing_task = asyncio.create_task(_keep_typing())
 
     try:
-        reply, history, usage = await asyncio.to_thread(chat, history, user_text)
+        token = set_active_user(user_id)
+        try:
+            reply, history, usage = await asyncio.to_thread(chat, history, user_text)
+        finally:
+            reset_active_user(token)
         _histories[user_id] = history
 
         # 超长消息分段发送，HTML 解析失败时降级为纯文本
@@ -129,7 +137,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
                 await update.message.reply_text(chunk)
 
         # 发送工具生成的文件（如 HTML 报表）
-        for f in pop_pending_files():
+        for f in pop_pending_files(user_id):
             try:
                 with open(f["path"], "rb") as fh:
                     await update.message.reply_document(

@@ -81,6 +81,7 @@ def parse_flex_xml(xml_str: str) -> dict:
 def _parse_statement(stmt: ET.Element) -> dict:
     account_id = stmt.get("accountId", "")
     alias = stmt.get("acctAlias", "") or ""
+    base_currency = _parse_equity_summary(stmt)[2]
 
     # ---- 1. 汇率表（本币 → 基础货币）----
     fx_rates = _parse_fx_rates(stmt)
@@ -89,7 +90,7 @@ def _parse_statement(stmt: ET.Element) -> dict:
     positions = _parse_positions(stmt)
 
     # ---- 3. 现金 ----
-    cash_balances, cash_base_total = _parse_cash(stmt, fx_rates)
+    cash_balances, cash_base_total = _parse_cash(stmt, fx_rates, base_currency)
 
     # ---- 4. 净值（从 EquitySummary 取最新一天）----
     net_liquidation, stock_value_base, base_currency = _parse_equity_summary(stmt)
@@ -181,7 +182,7 @@ def _parse_positions(stmt: ET.Element) -> list[dict]:
     return sorted(positions, key=lambda x: abs(x["market_value_base"]), reverse=True)
 
 
-def _parse_cash(stmt: ET.Element, fx_rates: dict) -> tuple[list[dict], float]:
+def _parse_cash(stmt: ET.Element, fx_rates: dict, base_currency: str) -> tuple[list[dict], float]:
     balances = []
     cash_base_total = 0.0
 
@@ -199,7 +200,7 @@ def _parse_cash(stmt: ET.Element, fx_rates: dict) -> tuple[list[dict], float]:
 
         # 用 ConversionRate 折算（如无，fallback 1）
         # 从持仓的 fxRateToBase 推断也可，这里用 rates 表
-        rate_key = f"{currency}->BASE"
+        rate_key = f"{currency}->{base_currency}"
         fx = fx_rates.get(rate_key, None)
         if fx is None:
             # 尝试从持仓中找该货币的汇率

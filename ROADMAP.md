@@ -43,13 +43,17 @@ IBKR 报表模块   新闻模块      仓位操作模块
 
 **定价（Sonnet 4.6）**：$3.00 / 1M input tokens，$15.00 / 1M output tokens
 
-### Phase 3 — 新闻解读
-**目标**：对持仓标的做新闻分析
+### Phase 3 — 新闻解读 ✅
+**目标**：对持仓标的及大盘做新闻分析
 
-- [ ] 选型并集成新闻/搜索 API（Tavily / yfinance / Serper）
-- [ ] 新增 `get_news` 工具（加入 tools.py 注册表）
-- [ ] Opus 做影响分析：利好/利空/中性
-- [ ] 支持自然语言触发（"帮我看看腾讯最近有什么新闻"）
+- [x] 集成 xAI Grok API（`grok-4-1-fast-reasoning`，Responses API `/v1/responses`）
+- [x] 新增 `get_news` 工具（`web_search` + `x_search` 双源实时搜索）
+- [x] Claude Sonnet 对 Grok 返回内容做利好/利空/中性分析
+- [x] 支持自然语言触发：个股、行业、大盘、宏观主题均可
+- [x] 5 分钟新闻缓存，相同 query 不重复调用 Grok
+
+**模型**：Grok `grok-4-1-fast-reasoning`（xAI Responses API）
+**新增环境变量**：`GROK_API_KEY`
 
 ### Phase 4 — 风险分析
 **目标**：Opus 对整体仓位做深度风险评估
@@ -122,7 +126,8 @@ FinanceBro/
 |------|------|------|
 | 对话 / 工具调度 | claude-sonnet-4-6 | 够用，省钱 |
 | 数据格式化 / HTML 生成 | 纯 Python | 确定性输出，无需 AI |
-| 风险分析 / 新闻解读 | claude-opus-4-6 | 需要深度推理 |
+| 新闻搜索（实时） | grok-4-1-fast-reasoning | X/web 实时数据源 |
+| 风险分析 | claude-opus-4-6 | 需要深度推理 |
 | 交易决策建议 | claude-opus-4-6 + thinking | 最高质量 |
 
 ---
@@ -135,4 +140,5 @@ TELEGRAM_ALLOWED_USERS   允许访问的用户 ID（逗号分隔）
 IBKR_FLEX_TOKEN          IBKR Flex Web Service Token
 IBKR_FLEX_QUERY_ID       Flex Query ID（在 IBKR 后台配置）
 ANTHROPIC_API_KEY        Anthropic API Key
+GROK_API_KEY             xAI Grok API Key（console.x.ai）
 ```

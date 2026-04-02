@@ -43,6 +43,15 @@ def build_report_messages(data: dict) -> list[str]:
 
 
 def _build_total_summary(accounts: list[dict], report_date: str) -> str:
+    if len({a["base_currency"] for a in accounts}) > 1:
+        lines = [f"<b>📊 分账户汇总</b>  <code>{escape(report_date)}</code>", ""]
+        for acct in accounts:
+            s = acct["summary"]
+            alias = escape(acct["alias"] or acct["account_id"])
+            base_ccy = escape(acct["base_currency"])
+            lines.append(f"  • <b>{alias}</b>　净值 {_money(s['net_liquidation'])} {base_ccy}")
+        return "\n".join(lines)
+
     total_net_liq = sum(a["summary"]["net_liquidation"] for a in accounts)
     total_pnl = sum(a["summary"]["total_unrealized_pnl_base"] for a in accounts)
     total_cost = sum(a["summary"]["total_cost_base"] for a in accounts)
@@ -51,7 +60,7 @@ def _build_total_summary(accounts: list[dict], report_date: str) -> str:
     base_ccy = accounts[0]["base_currency"] if accounts else "HKD"
 
     lines = [
-        f"<b>📊 总账户汇总</b>  <code>{report_date}</code>",
+        f"<b>📊 总账户汇总</b>  <code>{escape(report_date)}</code>",
         "",
         f"合计净值　{_money(total_net_liq)} {base_ccy}",
         f"合计浮盈　{_pnl_str(total_pnl)} {base_ccy}　{_pct(total_pnl_pct)}",
@@ -59,7 +68,7 @@ def _build_total_summary(accounts: list[dict], report_date: str) -> str:
     ]
     for acct in accounts:
         s = acct["summary"]
-        alias = acct["alias"] or acct["account_id"]
+        alias = escape(acct["alias"] or acct["account_id"])
         lines.append(
             f"  • <b>{alias}</b>　净值 {_money(s['net_liquidation'])} {acct['base_currency']}"
         )
@@ -76,10 +85,12 @@ def _build_account_section(acct: dict) -> str:
     cash_balances = acct["cash_balances"]
 
     lines: list[str] = []
-    title = f"<b>{alias}</b>" if alias != account_id else f"<b>{account_id}</b>"
+    safe_alias = escape(alias)
+    safe_account_id = escape(account_id)
+    title = f"<b>{safe_alias}</b>" if alias != account_id else f"<b>{safe_account_id}</b>"
     lines += [
         f"{'━' * 20}",
-        f"{title}  <code>{account_id}</code>",
+        f"{title}  <code>{safe_account_id}</code>",
         "",
     ]
 
@@ -104,7 +115,7 @@ def _build_account_section(acct: dict) -> str:
         lines.append("<b>现金余额</b>")
         for cb in cash_balances:
             lines.append(
-                f"  {cb['currency']}　{_money(cb['ending_cash'])}　"
+                f"  {escape(cb['currency'])}　{_money(cb['ending_cash'])}　"
                 f"≈ {_money(cb['ending_cash_base'])} {base_ccy}"
             )
 
@@ -112,10 +123,9 @@ def _build_account_section(acct: dict) -> str:
 
 
 def _build_position_line(pos: dict, base_ccy: str) -> str:
-    symbol = pos["symbol"]
-    desc = _truncate(pos["description"], 16)
+    symbol = escape(pos["symbol"])
+    desc = escape(_truncate(pos["description"], 16))
     currency = pos["currency"]
-    qty = int(pos["quantity"]) if pos["quantity"] == int(pos["quantity"]) else pos["quantity"]
     mv = pos["market_value"]
     mv_base = pos["market_value_base"]
     pnl = pos["unrealized_pnl"]
@@ -204,9 +214,10 @@ def _render_html(data: dict) -> str:
     risk_items = _build_risk_items(metrics)
     summary_sentence = _build_summary_sentence(metrics)
     account_cards = "".join(_render_account_snapshot(acct) for acct in accounts)
-    top_positions = _render_top_positions(metrics["positions"], base_ccy)
-    full_holdings = _render_full_holdings(metrics["positions"], base_ccy)
+    top_positions = _render_top_positions(metrics["positions"], base_ccy, metrics["can_consolidate"])
+    full_holdings = _render_full_holdings(metrics["positions"], base_ccy, metrics["can_consolidate"])
     cash_table = _render_cash_section(metrics["cash_balances"], base_ccy)
+    mixed_currency_notice = _render_mixed_currency_notice(metrics)
 
     return f"""<!DOCTYPE html>
 <html lang="zh">
@@ -504,14 +515,16 @@ def _render_html(data: dict) -> str:
       </div>
     </section>
 
+    {mixed_currency_notice}
+
     <section class="section">
       <h2 class="section-title">总览</h2>
       <div class="grid metric-grid">
-        {_render_metric_card("总资产", _money(metrics["total_net"]), base_ccy)}
-        {_render_metric_card("账面盈亏", _pnl_str(metrics["total_pnl"]), base_ccy, _sentiment_class(metrics["total_pnl"]))}
-        {_render_metric_card("现金占比", _plain_pct(metrics["cash_ratio"]), "", _level_to_class(metrics["cash_ratio_level"]))}
-        {_render_metric_card("最大持仓占比", _plain_pct(metrics["largest_position_weight"]), "", _level_to_class(metrics["largest_position_level"]))}
-        {_render_metric_card("前五大集中度", _plain_pct(metrics["top5_concentration"]), "", _level_to_class(metrics["top5_level"]))}
+        {_render_metric_card("总资产", _metric_value(metrics["total_net"], base_ccy, metrics["can_consolidate"]), "")}
+        {_render_metric_card("账面盈亏", _metric_value(metrics["total_pnl"], base_ccy, metrics["can_consolidate"], pnl=True), "", _sentiment_class(metrics["total_pnl"]) if metrics["can_consolidate"] else "neutral")}
+        {_render_metric_card("现金占比", _ratio_value(metrics["cash_ratio"], metrics["can_consolidate"]), "", _level_to_class(metrics["cash_ratio_level"]) if metrics["can_consolidate"] else "neutral")}
+        {_render_metric_card("最大持仓占比", _ratio_value(metrics["largest_position_weight"], True), "", _level_to_class(metrics["largest_position_level"]))}
+        {_render_metric_card("前五大集中度", _ratio_value(metrics["top5_concentration"], metrics["can_consolidate"]), "", _level_to_class(metrics["top5_level"]) if metrics["can_consolidate"] else "neutral")}
       </div>
     </section>
 
@@ -526,9 +539,9 @@ def _render_html(data: dict) -> str:
       <h2 class="section-title">资金分布</h2>
       <div class="grid alloc-grid">
         <div class="bars">
-          {_render_bar("股票仓位", metrics["equity_ratio"], "equity", f"{_money(metrics['total_stock'])} {base_ccy}")}
-          {_render_bar("现金仓位", metrics["cash_ratio"], "cash", f"{_money(metrics['total_cash'])} {base_ccy}")}
-          {_render_bar("其他项目", metrics["other_ratio"], "other", f"{_money(metrics['other_assets'])} {base_ccy}")}
+          {_render_bar("股票仓位", metrics["equity_ratio"], "equity", f"{_money(metrics['total_stock'])} {base_ccy}" if metrics["can_consolidate"] else "-")}
+          {_render_bar("现金仓位", metrics["cash_ratio"], "cash", f"{_money(metrics['total_cash'])} {base_ccy}" if metrics["can_consolidate"] else "-")}
+          {_render_bar("其他项目", metrics["other_ratio"], "other", f"{_money(metrics['other_assets'])} {base_ccy}" if metrics["can_consolidate"] else "-")}
         </div>
       </div>
     </section>
@@ -570,14 +583,16 @@ def _render_html(data: dict) -> str:
 def _portfolio_metrics(accounts: list[dict]) -> dict:
     positions: list[dict] = []
     cash_balances: list[dict] = []
+    base_currencies = sorted({a["base_currency"] for a in accounts})
+    can_consolidate = len(base_currencies) <= 1
 
-    total_net = sum(a["summary"]["net_liquidation"] for a in accounts)
-    total_stock = sum(a["summary"]["stock_value_base"] for a in accounts)
-    total_cash = sum(a["summary"]["cash_base"] for a in accounts)
-    total_pnl = sum(a["summary"]["total_unrealized_pnl_base"] for a in accounts)
-    total_cost = sum(a["summary"]["total_cost_base"] for a in accounts)
+    total_net = sum(a["summary"]["net_liquidation"] for a in accounts) if can_consolidate else 0.0
+    total_stock = sum(a["summary"]["stock_value_base"] for a in accounts) if can_consolidate else 0.0
+    total_cash = sum(a["summary"]["cash_base"] for a in accounts) if can_consolidate else 0.0
+    total_pnl = sum(a["summary"]["total_unrealized_pnl_base"] for a in accounts) if can_consolidate else 0.0
+    total_cost = sum(a["summary"]["total_cost_base"] for a in accounts) if can_consolidate else 0.0
     total_pnl_pct = (total_pnl / total_cost * 100) if total_cost else 0.0
-    base_currency = accounts[0]["base_currency"] if accounts else "HKD"
+    base_currency = base_currencies[0] if base_currencies else "HKD"
 
     for acct in accounts:
         alias = acct["alias"] or acct["account_id"]
@@ -596,25 +611,35 @@ def _portfolio_metrics(accounts: list[dict]) -> dict:
             balance["account_id"] = acct["account_id"]
             cash_balances.append(balance)
 
-    positions.sort(key=lambda item: item["market_value_base"], reverse=True)
+    if can_consolidate:
+        positions.sort(key=lambda item: item["market_value_base"], reverse=True)
+    else:
+        positions.sort(key=lambda item: (item["account_label"], -abs(item["market_value_base"]), item["symbol"]))
     for position in positions:
-        position["weight"] = (position["market_value_base"] / total_net * 100) if total_net else 0.0
-    largest_position_weight = (positions[0]["market_value_base"] / total_net * 100) if positions and total_net else 0.0
+        position["weight"] = (
+            (position["market_value_base"] / total_net * 100)
+            if can_consolidate and total_net
+            else position["account_weight"]
+        )
+    largest_position_weight = (
+        (positions[0]["market_value_base"] / total_net * 100)
+        if can_consolidate and positions and total_net
+        else max((p["account_weight"] for p in positions), default=0.0)
+    )
     top5_concentration = (
         sum(p["market_value_base"] for p in positions[:5]) / total_net * 100
-        if total_net else 0.0
+        if can_consolidate and total_net else 0.0
     )
-    equity_ratio = (total_stock / total_net * 100) if total_net else 0.0
-    cash_ratio = (total_cash / total_net * 100) if total_net else 0.0
-    other_assets = max(total_net - total_stock - total_cash, 0.0)
-    other_ratio = (other_assets / total_net * 100) if total_net else 0.0
-
-    best_position = max(positions, key=lambda item: item["unrealized_pnl_base"], default=None)
-    worst_position = min(positions, key=lambda item: item["unrealized_pnl_base"], default=None)
+    equity_ratio = (total_stock / total_net * 100) if can_consolidate and total_net else 0.0
+    cash_ratio = (total_cash / total_net * 100) if can_consolidate and total_net else 0.0
+    other_assets = max(total_net - total_stock - total_cash, 0.0) if can_consolidate else 0.0
+    other_ratio = (other_assets / total_net * 100) if can_consolidate and total_net else 0.0
 
     return {
         "account_count": len(accounts),
+        "can_consolidate": can_consolidate,
         "base_currency": base_currency,
+        "base_currencies": base_currencies,
         "positions": positions,
         "cash_balances": cash_balances,
         "total_net": total_net,
@@ -633,15 +658,14 @@ def _portfolio_metrics(accounts: list[dict]) -> dict:
         "largest_position_level": _risk_level(largest_position_weight, 10, 20),
         "top5_level": _risk_level(top5_concentration, 35, 55),
         "cash_ratio_level": _cash_level(cash_ratio),
-        "cash_ratio_note": _cash_note(cash_ratio),
-        "largest_position_note": _largest_position_note(largest_position_weight, positions[0] if positions else None),
-        "top5_note": _top5_note(top5_concentration, len(positions)),
-        "best_position": best_position,
-        "worst_position": worst_position,
     }
 
 
 def _build_summary_sentence(metrics: dict) -> str:
+    if not metrics["can_consolidate"]:
+        currencies = " / ".join(metrics["base_currencies"])
+        return f"检测到多个基准货币账户（{currencies}），本页不做错误合并；总览请以分账户数据为准。"
+
     pnl_phrase = "处于账面盈利状态" if metrics["total_pnl"] >= 0 else "处于账面亏损状态"
     cash_phrase = {
         "good": "现金缓冲相对充足",
@@ -661,6 +685,15 @@ def _build_summary_sentence(metrics: dict) -> str:
 
 
 def _build_risk_items(metrics: dict) -> str:
+    if not metrics["can_consolidate"]:
+        return """
+        <article class="risk-card warn">
+          <div class="pill warn">分账户查看</div>
+          <h3 class="risk-title">检测到多基准货币账户</h3>
+          <p class="risk-copy">已停用合并后的风险比例，避免把不同货币直接相加。</p>
+        </article>
+        """
+
     items = [
         {
             "level": metrics["top5_level"],
@@ -691,76 +724,30 @@ def _build_risk_items(metrics: dict) -> str:
     )
 
 
-def _build_allocation_cards(metrics: dict) -> str:
-    cards = [
-        (
-            "股票仓位",
-            "股票市值占总资产的比例。这个比例越高，整体波动通常越大，但上涨时收益弹性也更高。",
-            f"当前约 {_plain_pct(metrics['equity_ratio'])} 的资产在股票里。",
-        ),
-        (
-            "现金仓位",
-            "现金相当于你的缓冲垫。现金不是坏事，它能让你在下跌时更从容，也能减少组合波动。",
-            metrics["cash_ratio_note"],
-        ),
-        (
-            "持仓数量",
-            "持仓数量本身不代表一定更好，但过少通常意味着风险集中，过多则可能难以跟踪。",
-            f"你当前共有 {metrics['position_count']} 个持仓。",
-        ),
-    ]
-    return "".join(
-        f"""
-        <div class="helper-card">
-          <h3>{escape(title)}</h3>
-          <p>{escape(body)} {escape(note)}</p>
-        </div>
-        """
-        for title, body, note in cards
-    )
+def _render_mixed_currency_notice(metrics: dict) -> str:
+    if metrics["can_consolidate"]:
+        return ""
+    currencies = " / ".join(metrics["base_currencies"])
+    return f"""
+    <section class="section">
+      <h2 class="section-title">说明</h2>
+      <div class="risk-card warn">
+        <div class="pill warn">多基准货币</div>
+        <h3 class="risk-title">已关闭错误合并</h3>
+        <p class="risk-copy">检测到多个基准货币账户（{escape(currencies)}）。本页不再把不同货币直接相加，合并比例仅在同一基准货币下显示。</p>
+      </div>
+    </section>
+    """
 
 
-def _build_action_items(metrics: dict) -> str:
-    items = [
-        {
-            "title": "先看仓位是不是太重",
-            "copy": (
-                f"你目前股票仓位约 {_plain_pct(metrics['equity_ratio'])}，"
-                " 这代表大部分资产已经暴露在市场波动里。"
-            ),
-            "next_step": _equity_action_note(metrics["equity_ratio"]),
-        },
-        {
-            "title": "再看你有没有缓冲空间",
-            "copy": (
-                f"当前现金占比约 {_plain_pct(metrics['cash_ratio'])}。"
-                " 现金越少，市场继续下跌时越难从容调整。"
-            ),
-            "next_step": metrics["cash_ratio_note"],
-        },
-        {
-            "title": "最后看风险是不是压在少数股票上",
-            "copy": (
-                f"前五大持仓集中度为 {_plain_pct(metrics['top5_concentration'])}，"
-                f" 最大单一持仓为 {_plain_pct(metrics['largest_position_weight'])}。"
-            ),
-            "next_step": _concentration_action_note(
-                metrics["top5_concentration"],
-                metrics["largest_position_weight"],
-            ),
-        },
-    ]
+def _metric_value(value: float, unit: str, can_consolidate: bool, pnl: bool = False) -> str:
+    if not can_consolidate:
+        return "-"
+    return f"{_pnl_str(value) if pnl else _money(value)} {unit}".strip()
 
-    return "".join(
-        f"""
-        <article class="action-card">
-          <h3>{escape(item['title'])}</h3>
-          <p>{escape(item['copy'])}</p>
-          <p><strong>你可以这样理解：</strong> {escape(item['next_step'])}</p>
-        </article>
-        """
-        for item in items
-    )
+
+def _ratio_value(value: float, enabled: bool) -> str:
+    return _plain_pct(value) if enabled else "-"
 
 
 def _render_account_snapshot(acct: dict) -> str:
@@ -803,56 +790,13 @@ def _render_account_snapshot(acct: dict) -> str:
       </div>
     </article>
     """
+def _render_top_positions(positions: list[dict], base_ccy: str, can_consolidate: bool) -> str:
+    if not can_consolidate:
+        return "<p>多基准货币账户未做跨账户持仓排名。</p>"
 
-
-def _render_movers(metrics: dict, base_ccy: str) -> str:
-    winner = metrics["best_position"]
-    loser = metrics["worst_position"]
-
-    return (
-        _render_mover_card(
-            "当前最赚钱的持仓",
-            "最好表现",
-            winner,
-            base_ccy,
-            "这只持仓目前是你组合里账面贡献最大的标的。",
-        )
-        + _render_mover_card(
-            "当前拖累最大的持仓",
-            "最大拖累",
-            loser,
-            base_ccy,
-            "这只持仓目前对你的整体账面结果拖累最大，值得重点复盘。",
-        )
-    )
-
-
-def _render_mover_card(title: str, kicker: str, position: dict | None, base_ccy: str, default_note: str) -> str:
-    if not position:
-        return f"""
-        <article class="spotlight-card">
-          <div class="spotlight-kicker">{escape(kicker)}</div>
-          <h3 class="spotlight-title">{escape(title)}</h3>
-          <div class="spotlight-meta">当前没有可用持仓数据。</div>
-          <div class="spotlight-note">等有持仓后，这里会帮你快速找出最赚钱和最拖累的标的。</div>
-        </article>
-        """
-
-    return f"""
-    <article class="spotlight-card">
-      <div class="spotlight-kicker">{escape(kicker)}</div>
-      <h3 class="spotlight-title">{escape(position['symbol'])}</h3>
-      <div class="spotlight-meta">{escape(position['description'])} · {escape(position['account_label'])}</div>
-      <div class="spotlight-value {_sentiment_class(position['unrealized_pnl_base'])}">{_pnl_str(position['unrealized_pnl_base'])} {escape(base_ccy)}</div>
-      <div class="spotlight-meta">收益率 {_signed_pct(position['unrealized_pnl_pct'])} · 仓位占比 {_plain_pct(position['weight'])}</div>
-      <div class="spotlight-note">{escape(default_note)}</div>
-    </article>
-    """
-
-
-def _render_top_positions(positions: list[dict], base_ccy: str) -> str:
     rows = []
     for pos in positions[:5]:
+        row_ccy = base_ccy if can_consolidate else pos["base_currency"]
         rows.append(
             f"""
             <tr>
@@ -861,9 +805,9 @@ def _render_top_positions(positions: list[dict], base_ccy: str) -> str:
                 <div class="desc">{escape(pos['description'])}</div>
                 <div class="subline">{escape(pos['account_label'])}</div>
               </td>
-              <td class="num">{_money(pos['market_value_base'])} {escape(base_ccy)}</td>
+              <td class="num">{_money(pos['market_value_base'])} {escape(row_ccy)}</td>
               <td class="num">{_plain_pct(pos['weight'])}</td>
-              <td class="num {_sentiment_class(pos['unrealized_pnl_base'])}">{_pnl_str(pos['unrealized_pnl_base'])} {escape(base_ccy)}</td>
+              <td class="num {_sentiment_class(pos['unrealized_pnl_base'])}">{_pnl_str(pos['unrealized_pnl_base'])} {escape(row_ccy)}</td>
               <td class="num {_sentiment_class(pos['unrealized_pnl_pct'])}">{_signed_pct(pos['unrealized_pnl_pct'])}</td>
             </tr>
             """
@@ -878,8 +822,8 @@ def _render_top_positions(positions: list[dict], base_ccy: str) -> str:
         <tr>
           <th>持仓</th>
           <th class="num">市值</th>
-          <th class="num">占总组合比例</th>
-          <th class="num">账面盈亏</th>
+          <th class="num">{'占总组合比例' if can_consolidate else '占账户比例'}</th>
+          <th class="num">{'账面盈亏' if can_consolidate else '持仓盈亏'}</th>
           <th class="num">收益率</th>
         </tr>
       </thead>
@@ -890,7 +834,7 @@ def _render_top_positions(positions: list[dict], base_ccy: str) -> str:
     """
 
 
-def _render_full_holdings(positions: list[dict], base_ccy: str) -> str:
+def _render_full_holdings(positions: list[dict], base_ccy: str, can_consolidate: bool) -> str:
     if not positions:
         return "<p class='section-subtitle'>当前没有持仓数据。</p>"
 
@@ -900,7 +844,7 @@ def _render_full_holdings(positions: list[dict], base_ccy: str) -> str:
         ("成本价", None, None),
         ("现价", None, None),
         ("市值", None, None),
-        ("仓位占比", None, None),
+        ("占比", None, None),
         ("账面盈亏", None, None),
         ("收益率", None, None),
     ]
@@ -913,15 +857,16 @@ def _render_full_holdings(positions: list[dict], base_ccy: str) -> str:
 
     rows = []
     for pos in positions:
+        row_ccy = base_ccy if can_consolidate else pos["base_currency"]
         quantity = int(pos["quantity"]) if pos["quantity"] == int(pos["quantity"]) else f"{pos['quantity']:.2f}"
         market_value = _money(pos["market_value"])
-        if pos["currency"] != base_ccy and pos["fx_rate"] != 1.0:
+        if pos["currency"] != row_ccy and pos["fx_rate"] != 1.0:
             value_cell = (
                 f"{market_value} {escape(pos['currency'])}"
-                f"<div class='subline'>≈ {_money(pos['market_value_base'])} {escape(base_ccy)}</div>"
+                f"<div class='subline'>≈ {_money(pos['market_value_base'])} {escape(row_ccy)}</div>"
             )
         else:
-            value_cell = f"{market_value} {escape(base_ccy)}"
+            value_cell = f"{market_value} {escape(row_ccy)}"
 
         rows.append(
             f"""
@@ -936,7 +881,7 @@ def _render_full_holdings(positions: list[dict], base_ccy: str) -> str:
               <td class="num">{pos['mark_price']:.4f}</td>
               <td class="num">{value_cell}</td>
               <td class="num">{_plain_pct(pos['weight'])}</td>
-              <td class="num {_sentiment_class(pos['unrealized_pnl_base'])}">{_pnl_str(pos['unrealized_pnl_base'])} {escape(base_ccy)}</td>
+              <td class="num {_sentiment_class(pos['unrealized_pnl_base'])}">{_pnl_str(pos['unrealized_pnl_base'])} {escape(row_ccy)}</td>
               <td class="num {_sentiment_class(pos['unrealized_pnl_pct'])}">{_signed_pct(pos['unrealized_pnl_pct'])}</td>
             </tr>
             """
@@ -1012,53 +957,6 @@ def _render_bar(label: str, pct: float, css_class: str, value: str) -> str:
       </div>
     </div>
     """
-
-
-def _tooltip(title: str, body: str) -> str:
-    return (
-        f"<button type='button' class='tooltip-trigger' "
-        f"data-tip-title='{escape(title, quote=True)}' "
-        f"data-tip-body='{escape(body, quote=True)}' aria-label='查看解释'>?</button>"
-    )
-
-
-def _popover_script() -> str:
-    return """
-const backdrop = document.getElementById('popover-backdrop');
-const title = document.getElementById('popover-title');
-const body = document.getElementById('popover-body');
-const closeBtn = document.getElementById('popover-close');
-
-function closePopover() {
-  backdrop.classList.remove('open');
-  backdrop.setAttribute('aria-hidden', 'true');
-}
-
-document.querySelectorAll('.tooltip-trigger').forEach((button) => {
-  button.addEventListener('click', () => {
-    title.textContent = button.dataset.tipTitle || '';
-    body.textContent = button.dataset.tipBody || '';
-    backdrop.classList.add('open');
-    backdrop.setAttribute('aria-hidden', 'false');
-  });
-});
-
-backdrop.addEventListener('click', (event) => {
-  if (event.target === backdrop) {
-    closePopover();
-  }
-});
-
-closeBtn.addEventListener('click', closePopover);
-
-document.addEventListener('keydown', (event) => {
-  if (event.key === 'Escape') {
-    closePopover();
-  }
-});
-"""
-
-
 def _risk_level(value: float, low: float, high: float) -> str:
     if value >= high:
         return "danger"
@@ -1073,51 +971,6 @@ def _cash_level(value: float) -> str:
     if value < 18:
         return "warn"
     return "good"
-
-
-def _cash_note(cash_ratio: float) -> str:
-    if cash_ratio < 8:
-        return "现金偏少，说明组合更像满仓状态，遇到大波动时缓冲空间有限。"
-    if cash_ratio < 18:
-        return "现金处于中等水平，说明你有一定缓冲，但防守能力还不算特别强。"
-    return "现金缓冲较充足，说明你保留了一定灵活性与防守空间。"
-
-
-def _largest_position_note(weight: float, position: dict | None) -> str:
-    if not position:
-        return "当前没有持仓数据。"
-    prefix = f"目前最大仓位是 {position['symbol']}，占总资产 {_plain_pct(weight)}。"
-    if weight >= 20:
-        return prefix + " 这已经是比较显著的单一暴露，走势会明显影响整体账户。"
-    if weight >= 10:
-        return prefix + " 这是值得持续关注的权重，单一标的已经开始影响组合稳定性。"
-    return prefix + " 目前单一标的依赖度还算温和。"
-
-
-def _top5_note(concentration: float, position_count: int) -> str:
-    if position_count == 0:
-        return "当前没有持仓数据。"
-    if concentration >= 55:
-        return "前五大持仓已经主导了大部分结果，组合波动会比较集中。"
-    if concentration >= 35:
-        return "前五大持仓已有明显影响，建议重点关注其中的大仓位。"
-    return "前五大持仓的集中程度还算健康，整体没有过度依赖少数持仓。"
-
-
-def _equity_action_note(equity_ratio: float) -> str:
-    if equity_ratio >= 85:
-        return "你的账户已经非常偏向股票，收益弹性高，但回撤时也会更难受。"
-    if equity_ratio >= 65:
-        return "你的仓位属于偏进攻型，既能参与上涨，也需要接受更明显波动。"
-    return "你的股票仓位不算极端，整体进攻性相对温和。"
-
-
-def _concentration_action_note(top5_concentration: float, largest_position_weight: float) -> str:
-    if top5_concentration >= 55 or largest_position_weight >= 20:
-        return "你需要重点盯住前几大仓位，因为它们已经足以决定大部分账户波动。"
-    if top5_concentration >= 35 or largest_position_weight >= 10:
-        return "组合开始有集中倾向，建议优先理解大仓位背后的逻辑和风险。"
-    return "目前集中度还算温和，风险没有明显压在极少数持仓上。"
 
 
 def _level_label(level: str) -> str:

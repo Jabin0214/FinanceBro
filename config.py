@@ -18,6 +18,9 @@ IBKR_FLEX_QUERY_ID = os.getenv("IBKR_FLEX_QUERY_ID")
 # Anthropic
 ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY")
 
+# xAI (Grok) — 新闻搜索
+GROK_API_KEY = os.getenv("GROK_API_KEY")
+
 # 模型分工
 ORCHESTRATOR_MODEL = "claude-sonnet-4-6"   # 调度 + 格式化
 ANALYZER_MODEL = "claude-opus-4-6"          # 深度分析（Phase 3+）
