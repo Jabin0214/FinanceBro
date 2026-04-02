@@ -24,7 +24,7 @@ from config import TELEGRAM_BOT_TOKEN, TELEGRAM_ALLOWED_USERS
 from ibkr.flex_query import fetch_flex_report
 from report.html_report import build_html_file
 from agent.orchestrator import chat
-from agent.tools import pop_pending_files, set_active_user, reset_active_user
+from agent.tools import pop_pending_files, set_active_user, reset_active_user, run_risk_analysis
 
 logger = logging.getLogger(__name__)
 
@@ -47,6 +47,7 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         "💬 <b>直接发消息</b>即可与 AI 对话，可询问持仓、盈亏分析等\n\n"
         "📋 <b>命令</b>\n"
         "/report — 直接获取持仓 HTML 报告\n"
+        "/risk   — 持仓风险分析（集中度 + 实时市场动态）\n"
         "/clear  — 清除对话历史",
         parse_mode=ParseMode.HTML,
     )
@@ -87,6 +88,41 @@ async def cmd_report(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
             f"❌ <b>获取报告失败</b>\n<code>{str(e)}</code>",
             parse_mode=ParseMode.HTML,
         )
+
+
+async def cmd_risk(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    user_id = update.effective_user.id
+
+    if not _is_allowed(user_id):
+        await update.message.reply_text("⛔ 未授权")
+        return
+
+    status_msg = await update.message.reply_text("⏳ 正在分析持仓风险，请稍候（Grok 需要搜索实时数据）...")
+
+    stop_typing = asyncio.Event()
+    async def _keep_typing():
+        while not stop_typing.is_set():
+            await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="typing")
+            await asyncio.sleep(4)
+    typing_task = asyncio.create_task(_keep_typing())
+
+    try:
+        result = await asyncio.to_thread(run_risk_analysis)
+        await status_msg.delete()
+        for chunk in _split(result):
+            try:
+                await update.message.reply_text(chunk, parse_mode=ParseMode.HTML)
+            except BadRequest:
+                await update.message.reply_text(chunk)
+    except Exception as e:
+        logger.exception(f"风险分析失败：{e}")
+        await status_msg.edit_text(
+            f"❌ <b>风险分析失败</b>\n<code>{str(e)}</code>",
+            parse_mode=ParseMode.HTML,
+        )
+    finally:
+        stop_typing.set()
+        typing_task.cancel()
 
 
 async def cmd_clear(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -189,6 +225,7 @@ def build_app() -> Application:
     app = Application.builder().token(TELEGRAM_BOT_TOKEN).build()
     app.add_handler(CommandHandler("start", cmd_start))
     app.add_handler(CommandHandler("report", cmd_report))
+    app.add_handler(CommandHandler("risk", cmd_risk))
     app.add_handler(CommandHandler("clear", cmd_clear))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
     return app

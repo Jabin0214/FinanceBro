@@ -80,7 +80,19 @@ TOOL_DEFINITIONS = [
             "required": ["query"],
         },
     },
-    # Phase 4: get_risk_analysis
+    {
+        "name": "get_risk_analysis",
+        "description": (
+            "对整体持仓进行深度风险评估，包括集中度分析、板块分布、币种敞口、"
+            "盈亏分布，并结合实时市场动态给出风险建议。"
+            "当用户询问风险、仓位安全性、是否过度集中、投资组合健康度等问题时调用。"
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {},
+            "required": [],
+        },
+    },
 ]
 
 
@@ -93,6 +105,8 @@ def execute_tool(name: str, tool_input: dict) -> str:
         return _generate_report()
     if name == "get_news":
         return _get_news(tool_input["query"])
+    if name == "get_risk_analysis":
+        return _get_risk_analysis()
     raise ValueError(f"未知工具: {name}")
 
 
@@ -238,3 +252,32 @@ def _get_news(query: str) -> str:
     except Exception as e:
         logger.exception("get_news 执行异常")
         return f"新闻获取失败：{e}"
+
+
+def run_risk_analysis() -> str:
+    """公开入口，供 bot 层 /risk 命令直接调用。"""
+    return _get_risk_analysis()
+
+
+def _get_risk_analysis() -> str:
+    from ibkr.flex_query import fetch_flex_report
+    from agent.risk_calculator import compute_metrics
+    from agent.analyzer import analyze_risk
+
+    logger.info("工具调用: get_risk_analysis — 正在获取持仓数据...")
+
+    global _portfolio_cache, _portfolio_cache_ts
+    now = time.time()
+    if _portfolio_cache and now - _portfolio_cache_ts < _PORTFOLIO_CACHE_TTL:
+        data = _portfolio_cache
+    else:
+        data = fetch_flex_report()
+        _portfolio_cache = data
+        _portfolio_cache_ts = time.time()
+
+    metrics = compute_metrics(data)
+    if "error" in metrics:
+        return f"风险分析失败：{metrics['error']}"
+
+    logger.info("工具调用: get_risk_analysis — 正在调用 Grok 进行风险评估...")
+    return analyze_risk(metrics)
