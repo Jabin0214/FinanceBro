@@ -93,6 +93,128 @@ TOOL_DEFINITIONS = [
             "required": [],
         },
     },
+    {
+        "name": "get_option_chain",
+        "description": (
+            "通过 IB Gateway 查询指定标的的实时/延迟期权链，"
+            "返回到期日、行权价、bid/ask、delta、IV、OI、volume 等字段。"
+            "当用户询问某只股票的期权数据、IV、期权报价、期权链时调用。"
+            "需要 IB Gateway 正在运行。"
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "symbol": {
+                    "type": "string",
+                    "description": "美股/ETF 代码，如 'AAPL'、'SPY'、'QQQ'",
+                },
+                "dte_min": {
+                    "type": "integer",
+                    "description": "最小到期天数（默认 0）",
+                },
+                "dte_max": {
+                    "type": "integer",
+                    "description": "最大到期天数（默认 60）",
+                },
+            },
+            "required": ["symbol"],
+        },
+    },
+    {
+        "name": "scan_short_put_candidates",
+        "description": (
+            "筛选适合卖出的 cash-secured put 候选合约，"
+            "按 DTE、|delta|、权利金、OI、volume 过滤，结果按年化收益率排序。"
+            "当用户询问能卖哪些 put、cash-secured put 策略、卖 put 赚权利金时调用。"
+            "需要 IB Gateway 正在运行。"
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "symbol": {
+                    "type": "string",
+                    "description": "美股/ETF 代码",
+                },
+                "dte_min": {
+                    "type": "integer",
+                    "description": "最小 DTE（默认 20）",
+                },
+                "dte_max": {
+                    "type": "integer",
+                    "description": "最大 DTE（默认 45）",
+                },
+                "delta_min": {
+                    "type": "number",
+                    "description": "最小 |delta|（默认 0.15）",
+                },
+                "delta_max": {
+                    "type": "number",
+                    "description": "最大 |delta|（默认 0.30）",
+                },
+                "min_oi": {
+                    "type": "integer",
+                    "description": "最低未平仓量 OI（默认 100）",
+                },
+                "min_volume": {
+                    "type": "integer",
+                    "description": "最低当日成交量（默认 10）",
+                },
+                "min_premium": {
+                    "type": "number",
+                    "description": "最低权利金（默认 0.10 美元）",
+                },
+            },
+            "required": ["symbol"],
+        },
+    },
+    {
+        "name": "scan_covered_call_candidates",
+        "description": (
+            "筛选适合卖出的 covered call 候选合约，"
+            "按 DTE、delta、权利金、OI、volume 过滤，结果按年化收益率排序。"
+            "当用户询问能卖哪些 covered call、卖 call 增强收益时调用。"
+            "⚠️ 裸 call 不在此工具范围内，调用方须持有对应正股。"
+            "需要 IB Gateway 正在运行。"
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "symbol": {
+                    "type": "string",
+                    "description": "美股/ETF 代码（应已持有该股票正股）",
+                },
+                "dte_min": {
+                    "type": "integer",
+                    "description": "最小 DTE（默认 15）",
+                },
+                "dte_max": {
+                    "type": "integer",
+                    "description": "最大 DTE（默认 45）",
+                },
+                "delta_min": {
+                    "type": "number",
+                    "description": "最小 delta（默认 0.10）",
+                },
+                "delta_max": {
+                    "type": "number",
+                    "description": "最大 delta（默认 0.25）",
+                },
+                "min_oi": {
+                    "type": "integer",
+                    "description": "最低未平仓量 OI（默认 100）",
+                },
+                "min_volume": {
+                    "type": "integer",
+                    "description": "最低当日成交量（默认 10）",
+                },
+                "min_premium": {
+                    "type": "number",
+                    "description": "最低权利金（默认 0.10 美元）",
+                },
+            },
+            "required": ["symbol"],
+        },
+    },
 ]
 
 
@@ -107,6 +229,12 @@ def execute_tool(name: str, tool_input: dict) -> str:
         return _get_news(tool_input["query"])
     if name == "get_risk_analysis":
         return _get_risk_analysis()
+    if name == "get_option_chain":
+        return _get_option_chain(tool_input)
+    if name == "scan_short_put_candidates":
+        return _scan_short_put_candidates(tool_input)
+    if name == "scan_covered_call_candidates":
+        return _scan_covered_call_candidates(tool_input)
     raise ValueError(f"未知工具: {name}")
 
 
@@ -281,3 +409,51 @@ def _get_risk_analysis() -> str:
 
     logger.info("工具调用: get_risk_analysis — 正在调用 Grok 进行风险评估...")
     return analyze_risk(metrics)
+
+
+def _get_option_chain(tool_input: dict) -> str:
+    from ibkr.options import get_option_chain
+
+    symbol = tool_input["symbol"].upper().strip()
+    dte_min = int(tool_input.get("dte_min", 0))
+    dte_max = int(tool_input.get("dte_max", 60))
+
+    logger.info("工具调用: get_option_chain — symbol=%s dte=%d-%d", symbol, dte_min, dte_max)
+    result = get_option_chain(symbol, dte_min=dte_min, dte_max=dte_max)
+    return json.dumps(result, ensure_ascii=False)
+
+
+def _scan_short_put_candidates(tool_input: dict) -> str:
+    from ibkr.options import scan_short_put_candidates
+
+    symbol = tool_input["symbol"].upper().strip()
+    kwargs = {
+        "dte_min":     int(tool_input.get("dte_min", 20)),
+        "dte_max":     int(tool_input.get("dte_max", 45)),
+        "delta_min":   float(tool_input.get("delta_min", 0.15)),
+        "delta_max":   float(tool_input.get("delta_max", 0.30)),
+        "min_oi":      int(tool_input.get("min_oi", 100)),
+        "min_volume":  int(tool_input.get("min_volume", 10)),
+        "min_premium": float(tool_input.get("min_premium", 0.10)),
+    }
+    logger.info("工具调用: scan_short_put_candidates — symbol=%s params=%s", symbol, kwargs)
+    result = scan_short_put_candidates(symbol, **kwargs)
+    return json.dumps(result, ensure_ascii=False)
+
+
+def _scan_covered_call_candidates(tool_input: dict) -> str:
+    from ibkr.options import scan_covered_call_candidates
+
+    symbol = tool_input["symbol"].upper().strip()
+    kwargs = {
+        "dte_min":     int(tool_input.get("dte_min", 15)),
+        "dte_max":     int(tool_input.get("dte_max", 45)),
+        "delta_min":   float(tool_input.get("delta_min", 0.10)),
+        "delta_max":   float(tool_input.get("delta_max", 0.25)),
+        "min_oi":      int(tool_input.get("min_oi", 100)),
+        "min_volume":  int(tool_input.get("min_volume", 10)),
+        "min_premium": float(tool_input.get("min_premium", 0.10)),
+    }
+    logger.info("工具调用: scan_covered_call_candidates — symbol=%s params=%s", symbol, kwargs)
+    result = scan_covered_call_candidates(symbol, **kwargs)
+    return json.dumps(result, ensure_ascii=False)
