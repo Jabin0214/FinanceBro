@@ -55,6 +55,7 @@ def get_option_chain(
       "symbol": "AAPL",
       "underlying_price": 175.5,
       "data_type": "live" | "delayed" | "unknown",
+      "data_note": "实时行情" | "延迟行情，仅供参考" | "行情状态未知",
       "greeks_available": true,
       "greeks_note": null,
       "expirations": ["20251017", ...],
@@ -122,6 +123,7 @@ def scan_short_put_candidates(
         "strategy": "cash-secured put",
         "underlying_price": chain.get("underlying_price"),
         "data_type": chain.get("data_type"),
+        "data_note": chain.get("data_note"),
         "greeks_available": chain.get("greeks_available"),
         "greeks_note": chain.get("greeks_note"),
         "assumptions": {
@@ -183,6 +185,7 @@ def scan_covered_call_candidates(
         "strategy": "covered call",
         "underlying_price": chain.get("underlying_price"),
         "data_type": chain.get("data_type"),
+        "data_note": chain.get("data_note"),
         "greeks_available": chain.get("greeks_available"),
         "greeks_note": chain.get("greeks_note"),
         "assumptions": {
@@ -300,6 +303,7 @@ async def _fetch_chain(ib, symbol: str, dte_min: int, dte_max: int,
         "symbol": symbol,
         "underlying_price": underlying_price,
         "data_type": data_type,
+        "data_note": _market_data_note(data_type),
         "greeks_available": greeks_available,
         "greeks_note": (
             None if greeks_available
@@ -471,6 +475,14 @@ def _valid(v) -> bool:
         return v is not None and not math.isnan(v) and not math.isinf(v) and v > 0
     except (TypeError, ValueError):
         return False
+
+
+def _market_data_note(data_type: str) -> str:
+    if data_type == "live":
+        return "实时行情"
+    if data_type == "delayed":
+        return "延迟行情，仅供参考"
+    return "行情状态未知"
 
 
 def _safe_price(v) -> Optional[float]:

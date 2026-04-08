@@ -12,11 +12,11 @@ Orchestrator — Claude Sonnet 对话引擎
 
 import logging
 import anthropic
-from config import ORCHESTRATOR_MODEL
+from config import ANTHROPIC_API_KEY, ORCHESTRATOR_MODEL
 from agent.tools import TOOL_DEFINITIONS, execute_tool
 
 logger = logging.getLogger(__name__)
-client = anthropic.Anthropic()
+client = None
 
 MAX_HISTORY = 20  # 滑动窗口大小（条数）
 
@@ -50,6 +50,14 @@ def chat(history: list[dict], user_message: str) -> tuple[str, list[dict], dict]
     用量统计格式：{"input_tokens": int, "output_tokens": int, "cost_usd": float}
     history 格式为 Anthropic messages 列表，由调用方维护和存储。
     """
+    global client
+
+    if not ANTHROPIC_API_KEY:
+        raise RuntimeError("缺少 ANTHROPIC_API_KEY，请在 .env 中配置有效的 Anthropic API Key")
+
+    if client is None:
+        client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
+
     history = history + [{"role": "user", "content": user_message}]
     total_input = total_cache_write = total_cache_read = total_output = 0
 

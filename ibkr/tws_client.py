@@ -73,9 +73,9 @@ class TWSClient:
 
     def _start_loop(self):
         """在后台线程中创建事件循环并初始化 IB 对象。"""
-        from ib_insync import IB, util
         self._loop = asyncio.new_event_loop()
         asyncio.set_event_loop(self._loop)
+        from ib_insync import IB
         self._ib = IB()
         self._ready.set()
         logger.info("ib_insync 后台事件循环已启动")
