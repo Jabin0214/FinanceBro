@@ -58,13 +58,25 @@ IBKR 报表模块   新闻模块      仓位操作模块
 ### Phase 4 — IBKR 实时期权数据 + 卖方策略辅助
 **目标**：基于 IBKR 账户已有行情订阅，提供实时/准实时期权链查看与卖 `cash-secured put` / `covered call` 的候选筛选
 
-- [ ] 接入 IBKR TWS / IB Gateway（优先 `ib_insync`）
-- [ ] 新增 `get_option_chain` 工具：按股票代码返回到期日、行权价、bid/ask、delta、IV、OI、volume
-- [ ] 新增 `scan_short_put_candidates` 工具：面向 `cash-secured put`
-- [ ] 新增 `scan_covered_call_candidates` 工具：面向 `covered call`
-- [ ] 支持自然语言触发：如“帮我看看 AAPL 能卖哪些 put / call”
-- [ ] 输出中明确区分“数据事实”和“策略建议”，避免把建议包装成确定结论
-- [ ] 对缺失字段做降级处理：无 Greeks / 无 IV 时仍可返回基础报价，但提示数据不完整
+- [x] 接入 IBKR TWS / IB Gateway（优先 `ib_insync`）
+- [x] 新增 `get_option_chain` 工具：按股票代码返回到期日、行权价、bid/ask、delta、IV、OI、volume
+- [x] 新增 `scan_short_put_candidates` 工具：面向 `cash-secured put`
+- [x] 新增 `scan_covered_call_candidates` 工具：面向 `covered call`
+- [x] 支持自然语言触发：如“帮我看看 AAPL 能卖哪些 put / call”
+- [x] 输出中明确区分“数据事实”和“策略建议”，避免把建议包装成确定结论
+- [x] 对缺失字段做降级处理：无 Greeks / 无 IV 时仍可返回基础报价，但提示数据不完整
+
+**当前迭代进展（2026-04-16）**：
+- 已补强 `get_option_chain` / `scan_short_put_candidates` / `scan_covered_call_candidates` 的参数校验与友好报错
+- 已在 Telegram Bot 增加只读命令：`/options`、`/puts`、`/calls`
+- 已补充 Telegram 文本格式化，统一展示关键假设、候选合约和风险提示
+- 已把账户级约束接入期权扫描：
+  - `cash-secured put` 会结合账户 USD 现金余额计算单张资金占用与可卖张数
+  - `covered call` 会结合现有正股数量限制可卖张数，不再返回裸 call 候选
+- 已补充更严格的账户级风控：
+  - 卖 put 会检查卖出后单标的占账户净值是否超过默认 `25%`
+  - 候选结果会限制同一到期日最多返回 `2` 个，避免到期日过度集中
+- 已补充基础自动化校验，覆盖命令参数解析、格式化输出和关键边界条件
 
 **最小可用范围（MVP）**：
 - 标的范围先限制为美股 / ETF 期权
@@ -100,8 +112,8 @@ IBKR 报表模块   新闻模块      仓位操作模块
 - [x] `agent/risk_calculator.py`：纯 Python 指标计算（权重以多头总市值为分母；多币种统一用 `cost_basis_base`）
 - [x] `agent/analyzer.py`：Grok 分析引擎（`web_search` + `x_search` 实时搜索，结合当前市场动态输出风险报告）
 - [x] Telegram `/risk` 命令
-- [ ] 评估卖 put 所需现金占用、卖 covered call 对现有仓位的影响（待 Phase 4 期权数据打通后补充）
-- [ ] 为期权建议增加账户级限制：现金充足度、单标的上限、到期日分散度（同上）
+- [x] 在期权扫描结果中评估卖 put 所需现金占用、卖 covered call 对现有仓位的影响（基础版）
+- [x] 为期权建议增加账户级限制：现金充足度、单标的上限、到期日分散度（基础版）
 
 **模型**：Grok `grok-4-1-fast-reasoning`（实时搜索 + 深度分析，替代原计划的 Opus，兼具时效性和推理能力）
 
@@ -151,7 +163,7 @@ FinanceBro/
 │
 ├── report/                 # 报告输出层（纯 Python，不含 AI）
 │   ├── html_report.py      # HTML 报告生成
-│   └── formatter.py        # Telegram 文本格式化
+│   └── formatter.py        # Telegram 文本格式化（含期权链/候选摘要）
 │
 ├── agent/                  # AI 层
 │   ├── tools.py            # 工具注册表（含报表/新闻/期权扫描工具）
@@ -159,12 +171,8 @@ FinanceBro/
 │   ├── analyzer.py         # Phase 5: Grok 风险分析引擎
 │   └── risk_calculator.py  # Phase 5: 纯 Python 风险指标计算
 │
-├── bot/
-│   ├── telegram_bot.py     # Bot 主逻辑（命令 + 消息处理）
-│   └── keyboards.py        # Phase 7: 确认按钮
-│
-└── scheduler/
-    └── tasks.py            # Phase 8: 定时任务
+└── bot/
+    └── telegram_bot.py     # Bot 主逻辑（命令 + 消息处理）
 ```
 
 ---
@@ -191,4 +199,7 @@ IBKR_FLEX_TOKEN          IBKR Flex Web Service Token
 IBKR_FLEX_QUERY_ID       Flex Query ID（在 IBKR 后台配置）
 ANTHROPIC_API_KEY        Anthropic API Key
 GROK_API_KEY             xAI Grok API Key（console.x.ai）
+IBKR_TWS_HOST            IB Gateway / TWS 主机，默认 127.0.0.1
+IBKR_TWS_PORT            IB Gateway / TWS 端口，默认 4001
+IBKR_TWS_CLIENT_ID       IB Gateway / TWS client id，默认 10
 ```

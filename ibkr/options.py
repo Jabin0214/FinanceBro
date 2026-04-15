@@ -24,6 +24,7 @@ IBKR 期权链查询与候选筛选 — Phase 4
 import asyncio
 import logging
 import math
+import time
 from datetime import date, datetime, timedelta
 from typing import Optional
 
@@ -36,6 +37,11 @@ logger = logging.getLogger(__name__)
 _BATCH_SIZE = 25
 # 等待行情数据填充的秒数（延迟数据下适当加长）
 _MARKET_DATA_WAIT = 6
+_PORTFOLIO_CACHE_TTL = 300
+_portfolio_snapshot_cache: Optional[dict] = None
+_portfolio_snapshot_cache_ts: float = 0.0
+_MAX_SINGLE_STOCK_WEIGHT_PCT = 25.0
+_MAX_CANDIDATES_PER_EXPIRY = 2
 
 
 # ── 公开函数 ──────────────────────────────────────────────────────────────────
@@ -65,6 +71,11 @@ def get_option_chain(
       "error": null,
     }
     """
+    symbol = _normalize_symbol(symbol)
+    validation_error = _validate_common_inputs(symbol, dte_min, dte_max, max_strikes=max_strikes)
+    if validation_error:
+        return _err(symbol or "UNKNOWN", validation_error)
+
     try:
         client = get_tws_client()
         return client.run(
@@ -101,6 +112,20 @@ def scan_short_put_candidates(
 
     ⚠️ 关键假设会在返回结果中明确标注。
     """
+    symbol = _normalize_symbol(symbol)
+    validation_error = _validate_scan_inputs(
+        symbol=symbol,
+        dte_min=dte_min,
+        dte_max=dte_max,
+        delta_min=delta_min,
+        delta_max=delta_max,
+        min_oi=min_oi,
+        min_volume=min_volume,
+        min_premium=min_premium,
+    )
+    if validation_error:
+        return _err(symbol or "UNKNOWN", validation_error)
+
     chain = get_option_chain(
         symbol, dte_min=dte_min, dte_max=dte_max, rights=["P"], max_strikes=20
     )
@@ -117,6 +142,9 @@ def scan_short_put_candidates(
         min_volume=min_volume,
         min_premium=min_premium,
     )
+    account_context = _build_account_context(symbol)
+    candidates = _apply_cash_constraints(candidates, account_context)
+    candidates = _enforce_expiry_diversification(candidates, max_per_expiry=_MAX_CANDIDATES_PER_EXPIRY)
 
     return {
         "symbol": symbol,
@@ -132,8 +160,11 @@ def scan_short_put_candidates(
             "min_oi": min_oi,
             "min_volume": min_volume,
             "min_premium_per_contract": f"${min_premium:.2f}",
-            "note": "资金占用 = 行权价 × 100（每张合约），请确认账户现金充足",
+            "note": "资金占用 = 行权价 × 100（每张合约），并已结合账户美元现金做可卖张数约束",
+            "max_single_stock_weight_pct": _MAX_SINGLE_STOCK_WEIGHT_PCT,
+            "max_candidates_per_expiry": _MAX_CANDIDATES_PER_EXPIRY,
         },
+        "account_context": account_context,
         "candidates": candidates[:10],
         "total_found": len(candidates),
         "risk_note": "⚠️ 非投资建议，仅供决策辅助。卖出 Put 义务为以行权价买入 100 股，请自行评估最大亏损。",
@@ -163,6 +194,20 @@ def scan_covered_call_candidates(
 
     ⚠️ 裸 call 默认不在此工具范围内；调用方应确认持有对应正股。
     """
+    symbol = _normalize_symbol(symbol)
+    validation_error = _validate_scan_inputs(
+        symbol=symbol,
+        dte_min=dte_min,
+        dte_max=dte_max,
+        delta_min=delta_min,
+        delta_max=delta_max,
+        min_oi=min_oi,
+        min_volume=min_volume,
+        min_premium=min_premium,
+    )
+    if validation_error:
+        return _err(symbol or "UNKNOWN", validation_error)
+
     chain = get_option_chain(
         symbol, dte_min=dte_min, dte_max=dte_max, rights=["C"], max_strikes=20
     )
@@ -179,6 +224,9 @@ def scan_covered_call_candidates(
         min_volume=min_volume,
         min_premium=min_premium,
     )
+    account_context = _build_account_context(symbol)
+    candidates = _apply_covered_call_constraints(candidates, account_context)
+    candidates = _enforce_expiry_diversification(candidates, max_per_expiry=_MAX_CANDIDATES_PER_EXPIRY)
 
     return {
         "symbol": symbol,
@@ -194,8 +242,11 @@ def scan_covered_call_candidates(
             "min_oi": min_oi,
             "min_volume": min_volume,
             "min_premium_per_contract": f"${min_premium:.2f}",
-            "note": "需已持有标的正股（每张合约对应 100 股），否则视为裸 Call（无限风险）",
+            "note": "需已持有标的正股（每张合约对应 100 股），并已按持仓股数约束可卖张数",
+            "max_single_stock_weight_pct": _MAX_SINGLE_STOCK_WEIGHT_PCT,
+            "max_candidates_per_expiry": _MAX_CANDIDATES_PER_EXPIRY,
         },
+        "account_context": account_context,
         "candidates": candidates[:10],
         "total_found": len(candidates),
         "risk_note": "⚠️ 非投资建议，仅供决策辅助。卖出 Covered Call 可能限制上涨收益，并须确认持仓数量。",
@@ -464,6 +515,203 @@ def _filter_contracts(
 
 
 # ── 工具函数 ──────────────────────────────────────────────────────────────────
+
+def _normalize_symbol(symbol: str) -> str:
+    return (symbol or "").upper().strip()
+
+
+def _validate_common_inputs(
+    symbol: str,
+    dte_min: int,
+    dte_max: int,
+    *,
+    max_strikes: Optional[int] = None,
+) -> Optional[str]:
+    if not symbol:
+        return "symbol 不能为空"
+    if dte_min < 0 or dte_max < 0:
+        return "DTE 不能为负数"
+    if dte_min > dte_max:
+        return "dte_min 不能大于 dte_max"
+    if max_strikes is not None and max_strikes <= 0:
+        return "max_strikes 必须大于 0"
+    return None
+
+
+def _validate_scan_inputs(
+    *,
+    symbol: str,
+    dte_min: int,
+    dte_max: int,
+    delta_min: float,
+    delta_max: float,
+    min_oi: int,
+    min_volume: int,
+    min_premium: float,
+) -> Optional[str]:
+    common_error = _validate_common_inputs(symbol, dte_min, dte_max, max_strikes=20)
+    if common_error:
+        return common_error
+    if delta_min < 0 or delta_max < 0:
+        return "delta 范围不能为负数"
+    if delta_min > delta_max:
+        return "delta_min 不能大于 delta_max"
+    if delta_max > 1:
+        return "delta_max 不能大于 1"
+    if min_oi < 0:
+        return "min_oi 不能为负数"
+    if min_volume < 0:
+        return "min_volume 不能为负数"
+    if min_premium < 0:
+        return "min_premium 不能为负数"
+    return None
+
+
+def _get_portfolio_snapshot() -> dict:
+    global _portfolio_snapshot_cache, _portfolio_snapshot_cache_ts
+
+    now = time.time()
+    if _portfolio_snapshot_cache and now - _portfolio_snapshot_cache_ts < _PORTFOLIO_CACHE_TTL:
+        return _portfolio_snapshot_cache
+
+    from ibkr.flex_query import fetch_flex_report
+
+    snapshot = fetch_flex_report()
+    _portfolio_snapshot_cache = snapshot
+    _portfolio_snapshot_cache_ts = now
+    return snapshot
+
+
+def _build_account_context(symbol: str) -> dict:
+    try:
+        snapshot = _get_portfolio_snapshot()
+    except Exception as e:
+        logger.warning("读取账户快照失败：%s", e)
+        return {
+            "portfolio_available": False,
+            "symbol": symbol,
+            "error": f"账户快照不可用：{e}",
+        }
+
+    accounts = snapshot.get("accounts", [])
+    usd_cash = 0.0
+    shares_held = 0
+    symbol_market_value_base = 0.0
+    total_net_liquidation = 0.0
+    account_count = len(accounts)
+    base_currencies = sorted({acct.get("base_currency", "") for acct in accounts if acct.get("base_currency")})
+
+    for acct in accounts:
+        total_net_liquidation += float(acct.get("summary", {}).get("net_liquidation") or 0)
+        for balance in acct.get("cash_balances", []):
+            if balance.get("currency") == "USD":
+                usd_cash += float(balance.get("ending_cash") or 0)
+
+        for position in acct.get("positions", []):
+            if (
+                position.get("symbol") == symbol
+                and position.get("asset_category") == "STK"
+            ):
+                shares_held += int(float(position.get("quantity") or 0))
+                symbol_market_value_base += float(position.get("market_value_base") or 0)
+
+    symbol_weight_pct = (
+        round(symbol_market_value_base / total_net_liquidation * 100, 2)
+        if total_net_liquidation > 0
+        else 0.0
+    )
+
+    return {
+        "portfolio_available": True,
+        "symbol": symbol,
+        "account_count": account_count,
+        "base_currencies": base_currencies,
+        "usd_cash": round(usd_cash, 2),
+        "shares_held": shares_held,
+        "total_net_liquidation": round(total_net_liquidation, 2),
+        "symbol_market_value_base": round(symbol_market_value_base, 2),
+        "symbol_weight_pct": symbol_weight_pct,
+        "max_covered_calls": shares_held // 100,
+        "note": "现金约束基于账户内 USD 现金余额；covered call 约束基于现有正股数量。",
+    }
+
+
+def _apply_cash_constraints(candidates: list[dict], account_context: dict) -> list[dict]:
+    if not account_context.get("portfolio_available"):
+        return candidates
+
+    usd_cash = float(account_context.get("usd_cash") or 0)
+    total_net_liquidation = float(account_context.get("total_net_liquidation") or 0)
+    current_symbol_value = float(account_context.get("symbol_market_value_base") or 0)
+    constrained = []
+    for candidate in candidates:
+        strike = candidate.get("strike")
+        cash_required = round((strike or 0) * 100, 2) if strike is not None else None
+        max_contracts = (
+            int(usd_cash // cash_required)
+            if cash_required and cash_required > 0
+            else 0
+        )
+
+        enriched = dict(candidate)
+        enriched["cash_required_usd"] = cash_required
+        enriched["available_usd_cash"] = round(usd_cash, 2)
+        enriched["max_contracts_by_cash"] = max_contracts
+        projected_weight_pct = None
+        if cash_required and total_net_liquidation > 0:
+            projected_weight_pct = round(
+                (current_symbol_value + cash_required) / total_net_liquidation * 100,
+                2,
+            )
+        enriched["projected_weight_pct"] = projected_weight_pct
+        concentration_ok = (
+            projected_weight_pct is None
+            or projected_weight_pct <= _MAX_SINGLE_STOCK_WEIGHT_PCT
+        )
+        enriched["account_constraint"] = (
+            "cash_ok"
+            if max_contracts >= 1 and concentration_ok
+            else ("single_stock_limit" if max_contracts >= 1 else "insufficient_cash")
+        )
+        if max_contracts >= 1 and concentration_ok:
+            constrained.append(enriched)
+
+    return constrained
+
+
+def _apply_covered_call_constraints(candidates: list[dict], account_context: dict) -> list[dict]:
+    if not account_context.get("portfolio_available"):
+        return candidates
+
+    shares_held = int(account_context.get("shares_held") or 0)
+    max_contracts = shares_held // 100
+    if max_contracts < 1:
+        return []
+
+    constrained = []
+    for candidate in candidates:
+        enriched = dict(candidate)
+        enriched["shares_held"] = shares_held
+        enriched["max_contracts_by_shares"] = max_contracts
+        enriched["current_symbol_weight_pct"] = account_context.get("symbol_weight_pct")
+        enriched["account_constraint"] = "covered" if max_contracts >= 1 else "uncovered"
+        constrained.append(enriched)
+    return constrained
+
+
+def _enforce_expiry_diversification(candidates: list[dict], max_per_expiry: int) -> list[dict]:
+    if max_per_expiry <= 0:
+        return candidates
+
+    selected = []
+    expiry_counts: dict[str, int] = {}
+    for candidate in candidates:
+        expiry = candidate.get("expiry") or ""
+        if expiry_counts.get(expiry, 0) >= max_per_expiry:
+            continue
+        expiry_counts[expiry] = expiry_counts.get(expiry, 0) + 1
+        selected.append(candidate)
+    return selected
 
 def _err(symbol: str, msg: str) -> dict:
     return {"symbol": symbol, "error": msg, "contracts": [], "candidates": []}

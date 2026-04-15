@@ -16,7 +16,7 @@ from config import ANTHROPIC_API_KEY, ORCHESTRATOR_MODEL
 from agent.tools import TOOL_DEFINITIONS, execute_tool
 
 logger = logging.getLogger(__name__)
-client = None
+_client: anthropic.Anthropic | None = None
 
 MAX_HISTORY = 20  # 滑动窗口大小（条数）
 
@@ -50,21 +50,13 @@ def chat(history: list[dict], user_message: str) -> tuple[str, list[dict], dict]
     用量统计格式：{"input_tokens": int, "output_tokens": int, "cost_usd": float}
     history 格式为 Anthropic messages 列表，由调用方维护和存储。
     """
-    global client
-
-    if not ANTHROPIC_API_KEY:
-        raise RuntimeError("缺少 ANTHROPIC_API_KEY，请在 .env 中配置有效的 Anthropic API Key")
-
-    if client is None:
-        client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
-
     history = history + [{"role": "user", "content": user_message}]
     total_input = total_cache_write = total_cache_read = total_output = 0
 
     while True:
         trimmed = _trim(history)
 
-        response = client.messages.create(
+        response = _get_client().messages.create(
             model=ORCHESTRATOR_MODEL,
             max_tokens=2048,
             system=[{"type": "text", "text": SYSTEM_PROMPT, "cache_control": {"type": "ephemeral"}}],
@@ -128,6 +120,15 @@ def _calc_usage(input_tokens: int, cache_write: int, cache_read: int, output_tok
         "output_tokens": output_tokens,
         "cost_usd": cost,
     }
+
+
+def _get_client() -> anthropic.Anthropic:
+    global _client
+    if _client is None:
+        if not ANTHROPIC_API_KEY:
+            raise RuntimeError("缺少 ANTHROPIC_API_KEY，请在 .env 中配置有效的 Anthropic API Key")
+        _client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
+    return _client
 
 
 def _trim(history: list[dict]) -> list[dict]:
