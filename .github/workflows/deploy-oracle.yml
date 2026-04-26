@@ -1,0 +1,102 @@
+name: Deploy to Oracle
+
+on:
+  push:
+    branches:
+      - main
+
+concurrency:
+  group: deploy-oracle-main
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      DEPLOY_SHA: ${{ github.sha }}
+      ORACLE_HOST: ${{ secrets.ORACLE_HOST }}
+      ORACLE_HOST_KEY: ${{ secrets.ORACLE_HOST_KEY }}
+      ORACLE_PORT: ${{ secrets.ORACLE_PORT }}
+      ORACLE_USER: ${{ secrets.ORACLE_USER }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Validate deployment secrets
+        run: |
+          test -n "$ORACLE_HOST"
+          test -n "$ORACLE_HOST_KEY"
+          test -n "$ORACLE_USER"
+          test -n "${{ secrets.ORACLE_SSH_KEY }}"
+
+      - name: Prepare SSH key
+        env:
+          ORACLE_SSH_KEY: ${{ secrets.ORACLE_SSH_KEY }}
+        run: |
+          umask 077
+          printf '%s\n' "$ORACLE_SSH_KEY" > "$RUNNER_TEMP/oracle_ssh_key"
+          chmod 600 "$RUNNER_TEMP/oracle_ssh_key"
+
+      - name: Write trusted Oracle host key
+        run: |
+          mkdir -p ~/.ssh
+          chmod 700 ~/.ssh
+          printf '%s\n' "$ORACLE_HOST_KEY" > ~/.ssh/known_hosts
+          chmod 600 ~/.ssh/known_hosts
+
+      - name: Deploy on Oracle VM
+        run: |
+          ssh \
+            -i "$RUNNER_TEMP/oracle_ssh_key" \
+            -o BatchMode=yes \
+            -o ConnectTimeout=10 \
+            -o IdentitiesOnly=yes \
+            -o PreferredAuthentications=publickey \
+            -p "${ORACLE_PORT:-22}" \
+            "$ORACLE_USER@$ORACLE_HOST" \
+            "DEPLOY_SHA='$DEPLOY_SHA' bash -seuo pipefail" <<'EOF'
+          cd /opt/financebro
+          deploy_status=0
+
+          if git fetch --depth=1 origin "$DEPLOY_SHA" && git checkout main && git reset --hard "$DEPLOY_SHA"; then
+            :
+          else
+            deploy_status=$?
+          fi
+
+          if [ "$deploy_status" -eq 0 ]; then
+            if docker compose up -d --build; then
+              :
+            else
+              deploy_status=$?
+            fi
+          fi
+
+          docker compose ps || true
+          if [ "$deploy_status" -eq 0 ]; then
+            service_running=0
+            attempt=1
+            max_attempts=6
+
+            while [ "$attempt" -le "$max_attempts" ]; do
+              if docker compose ps --status running --services | grep -Fx 'financebro' >/dev/null; then
+                service_running=1
+                break
+              fi
+
+              echo "financebro service not running yet (attempt $attempt/$max_attempts)"
+              sleep 5
+              attempt=$((attempt + 1))
+            done
+
+            if [ "$service_running" -ne 1 ]; then
+              echo "financebro service did not reach running state"
+              deploy_status=1
+            fi
+          fi
+
+          docker compose ps --status running --services || true
+          docker compose logs --tail=50 || true
+          exit "$deploy_status"
+          EOF
