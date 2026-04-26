@@ -1,0 +1,45 @@
+services:
+  financebro:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: financebro
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      IBKR_TWS_HOST: ${IBKR_TWS_HOST:-ib-gateway}
+      IBKR_TWS_PORT: ${IBKR_TWS_PORT:-4002}
+      IBKR_TWS_CLIENT_ID: ${IBKR_TWS_CLIENT_ID:-10}
+    depends_on:
+      ib-gateway:
+        condition: service_started
+        required: false
+
+  ib-gateway:
+    image: ghcr.io/gnzsnz/ib-gateway:stable
+    container_name: ib-gateway
+    restart: unless-stopped
+    profiles:
+      - ibkr
+    env_file:
+      - .env
+    environment:
+      TWS_USERID: ${TWS_USERID:-}
+      TWS_PASSWORD: ${TWS_PASSWORD:-}
+      TRADING_MODE: ${TRADING_MODE:-paper}
+      READ_ONLY_API: ${READ_ONLY_API:-yes}
+      TWOFA_TIMEOUT_ACTION: ${TWOFA_TIMEOUT_ACTION:-restart}
+      AUTO_RESTART_TIME: ${AUTO_RESTART_TIME:-03:45 AM}
+      RELOGIN_AFTER_TWOFA_TIMEOUT: ${RELOGIN_AFTER_TWOFA_TIMEOUT:-no}
+      TIME_ZONE: ${IB_GATEWAY_TIME_ZONE:-America/New_York}
+      VNC_SERVER_PASSWORD: ${VNC_SERVER_PASSWORD:-}
+    ports:
+      - "127.0.0.1:4001:4001"
+      - "127.0.0.1:4002:4002"
+      - "127.0.0.1:5900:5900"
+    volumes:
+      - ib-gateway-settings:/root/Jts
+
+volumes:
+  ib-gateway-settings:

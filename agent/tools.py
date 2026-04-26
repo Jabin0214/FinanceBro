@@ -50,6 +50,19 @@ TOOL_DEFINITIONS = [
         },
     },
     {
+        "name": "get_realtime_account_snapshot",
+        "description": (
+            "通过 IB Gateway 获取实时账户快照，包括总净值、可用现金、"
+            "当前股票持仓、持仓数量和平均成本。"
+            "当用户询问当前实时持仓、实时现金、实时净值、当前有多少股某标的时调用。"
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {},
+            "required": [],
+        },
+    },
+    {
         "name": "generate_report",
         "description": (
             "生成完整的 IBKR 持仓 HTML 报表文件并发送给用户。"
@@ -223,6 +236,8 @@ TOOL_DEFINITIONS = [
 def execute_tool(name: str, tool_input: dict) -> str:
     if name == "get_portfolio":
         return _get_portfolio()
+    if name == "get_realtime_account_snapshot":
+        return _get_realtime_account_snapshot()
     if name == "generate_report":
         return _generate_report()
     if name == "get_news":
@@ -266,6 +281,14 @@ def _get_portfolio() -> str:
     _portfolio_cache = data
     _portfolio_cache_ts = time.time()
     return json.dumps(data, ensure_ascii=False)
+
+
+def _get_realtime_account_snapshot() -> str:
+    from ibkr.account import get_realtime_account_snapshot
+
+    logger.info("工具调用: get_realtime_account_snapshot")
+    result = get_realtime_account_snapshot()
+    return json.dumps(result, ensure_ascii=False)
 
 
 def _generate_report() -> str:

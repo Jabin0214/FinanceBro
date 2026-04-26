@@ -58,6 +58,7 @@ IBKR 报表模块   新闻模块      仓位操作模块
 ### Phase 4 — IBKR 实时期权数据 + 卖方策略辅助
 **目标**：基于 IBKR 账户已有行情订阅，提供实时/准实时期权链查看与卖 `cash-secured put` / `covered call` 的候选筛选
 
+- [x] 新增 IB Gateway 实时账户快照工具：总净值、可用现金、当前股票持仓、数量、平均成本
 - [ ] 接入 IBKR TWS / IB Gateway（优先 `ib_insync`）
 - [ ] 新增 `get_option_chain` 工具：按股票代码返回到期日、行权价、bid/ask、delta、IV、OI、volume
 - [ ] 新增 `scan_short_put_candidates` 工具：面向 `cash-secured put`
@@ -81,6 +82,7 @@ IBKR 报表模块   新闻模块      仓位操作模块
 - 每次迭代完成后，都要用 2 到 3 个真实标的做人工验收（如 `SPY`、`QQQ`、单一个股）
 
 **推荐迭代拆分**：
+- Iteration 0：打通实时账户快照读取，返回净值、可用现金、股票持仓数量和平均成本
 - Iteration 1：打通 IBKR 连接与单标的期权链读取，先返回原始关键字段
 - Iteration 2：加入筛选逻辑，支持按 DTE、delta、权利金、OI、volume 过滤
 - Iteration 3：加入自然语言封装与 Telegram 呈现，输出“候选合约 + 理由 + 风险提示”
@@ -193,9 +195,69 @@ ANTHROPIC_API_KEY        Anthropic API Key
 GROK_API_KEY             xAI Grok API Key（console.x.ai）
 ```
 
+### Realtime Account Snapshot
+
+通过 IB Gateway 可读取实时账户快照，包含：
+
+- 总净值
+- 可用现金
+- 当前股票持仓
+- 持仓数量
+- 平均成本
+
+该能力用于实时账户状态查询，不替代 Flex Query 报表。
+
+### Oracle 上运行 IB Gateway
+
+推荐生产形态：
+
+- `ib-gateway` 跑在 Oracle 的 Docker 容器里，由 `gnzsnz/ib-gateway:stable` 提供 IB Gateway + IBC。
+- `FinanceBro` 通过 Docker 内网连接 `ib-gateway:4002`（paper）或 `ib-gateway:4001`（live）。
+- `READ_ONLY_API=yes`，Gateway 侧限制 API 只读；FinanceBro 当前实时账户快照工具也只读取账户和持仓，不下单。
+- `AUTO_RESTART_TIME=03:45 AM`，IBC 每日自动重启 Gateway。
+- 每周人工做一次 IBKR 2FA 登录/确认；VNC 端口只绑定 Oracle 本机，需要通过 SSH tunnel 访问。
+
+在 Oracle `/opt/financebro/.env` 中开启：
+
+```bash
+COMPOSE_PROFILES=ibkr
+IBKR_TWS_HOST=ib-gateway
+IBKR_TWS_PORT=4002
+IBKR_TWS_CLIENT_ID=10
+
+TWS_USERID=your_ibkr_username
+TWS_PASSWORD=your_ibkr_password
+TRADING_MODE=paper
+READ_ONLY_API=yes
+TWOFA_TIMEOUT_ACTION=restart
+AUTO_RESTART_TIME=03:45 AM
+RELOGIN_AFTER_TWOFA_TIMEOUT=no
+IB_GATEWAY_TIME_ZONE=America/New_York
+VNC_SERVER_PASSWORD=use-a-strong-password
+```
+
+启动或更新：
+
+```bash
+cd /opt/financebro
+docker compose up -d --build
+docker compose ps
+docker compose logs -f --tail=100 ib-gateway
+```
+
+首次登录和每周 2FA：
+
+```bash
+ssh -i /Users/jabin/Downloads/ssh-key-2026-04-22.key \
+  -L 5900:127.0.0.1:5900 \
+  ubuntu@159.13.46.242
+```
+
+保持 SSH tunnel 打开，然后用本机 VNC Viewer 连接 `127.0.0.1:5900`，输入 `VNC_SERVER_PASSWORD`，完成 IBKR 登录和手机 2FA。
+
 ## 部署
 
-生产环境部署到 Oracle Cloud VM，默认由 GitHub Actions 在 `main` 分支收到新提交后自动执行。
+生产环境部署到 Oracle Cloud VM（Ubuntu 24.04，应用目录 `/opt/financebro`，运行方式 `docker compose up -d`），默认由 GitHub Actions 在 `main` 分支收到新提交后自动执行。
 
 日常发布流程：
 
@@ -206,3 +268,53 @@ git push origin main
 ```
 
 推送完成后，GitHub Actions 会连接 Oracle VM，在 `/opt/financebro` 上部署这次提交对应的精确 commit，并重建 `financebro` 容器。
+
+### GitHub Actions Secrets
+
+- `ORACLE_HOST`
+- `ORACLE_HOST_KEY`
+- `ORACLE_PORT`
+- `ORACLE_SSH_KEY`
+- `ORACLE_USER`
+
+### 首次服务器初始化
+
+```bash
+sudo apt-get update
+sudo apt-get install -y ca-certificates curl gnupg
+sudo install -m 0755 -d /etc/apt/keyrings
+curl -fsSL https://download.docker.com/linux/ubuntu/gpg | sudo gpg --dearmor -o /etc/apt/keyrings/docker.gpg
+sudo chmod a+r /etc/apt/keyrings/docker.gpg
+echo \
+  "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/ubuntu \
+  $(. /etc/os-release && echo "$VERSION_CODENAME") stable" | \
+  sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
+sudo apt-get update
+sudo apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+sudo usermod -aG docker "$USER"
+newgrp docker
+
+sudo mkdir -p /opt/financebro
+sudo chown "$USER":"$USER" /opt/financebro
+git clone https://github.com/Jabin0214/FinanceBro.git /opt/financebro
+cd /opt/financebro
+cp .env.example .env
+# edit .env with your real tokens before starting
+docker compose up -d --build
+```
+
+### 手动兜底部署
+
+自动部署失败时，先看 GitHub Actions 日志和 VM 上的容器状态，再用以下命令手动同步：
+
+```bash
+ssh ubuntu@<ORACLE_HOST> '
+cd /opt/financebro &&
+git fetch origin main &&
+git checkout main &&
+git reset --hard origin/main &&
+docker compose up -d --build &&
+docker compose ps &&
+docker compose logs --tail=50
+'
+```
