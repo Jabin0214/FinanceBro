@@ -22,13 +22,7 @@ from telegram.error import BadRequest
 
 from config import TELEGRAM_BOT_TOKEN, TELEGRAM_ALLOWED_USERS
 from ibkr.flex_query import fetch_flex_report
-from ibkr.options import (
-    get_option_chain,
-    scan_short_put_candidates,
-    scan_covered_call_candidates,
-)
 from report.html_report import build_html_file
-from report.formatter import format_option_chain_summary, format_option_candidates
 from agent.orchestrator import chat
 from agent.tools import pop_pending_files, set_active_user, reset_active_user
 
@@ -53,9 +47,6 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         "💬 <b>直接发消息</b>即可与 AI 对话，可询问持仓、盈亏分析等\n\n"
         "📋 <b>命令</b>\n"
         "/report — 直接获取持仓 HTML 报告\n"
-        "/options AAPL [dte_min] [dte_max] — 查看期权链摘要\n"
-        "/puts AAPL [dte_min] [dte_max] — 扫描 cash-secured put 候选\n"
-        "/calls AAPL [dte_min] [dte_max] — 扫描 covered call 候选\n"
         "/clear  — 清除对话历史",
         parse_mode=ParseMode.HTML,
     )
@@ -107,33 +98,6 @@ async def cmd_clear(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
     _histories.pop(user_id, None)
     await update.message.reply_text("🗑 对话历史已清除")
-
-
-async def cmd_options(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    await _run_option_command(
-        update,
-        context,
-        kind="chain",
-        status_text="⏳ 正在读取期权链，请稍候...",
-    )
-
-
-async def cmd_puts(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    await _run_option_command(
-        update,
-        context,
-        kind="puts",
-        status_text="⏳ 正在筛选 cash-secured put 候选，请稍候...",
-    )
-
-
-async def cmd_calls(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    await _run_option_command(
-        update,
-        context,
-        kind="calls",
-        status_text="⏳ 正在筛选 covered call 候选，请稍候...",
-    )
 
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -221,111 +185,10 @@ def _split(text: str, limit: int = 4000) -> list[str]:
     return parts
 
 
-async def _run_option_command(
-    update: Update,
-    context: ContextTypes.DEFAULT_TYPE,
-    *,
-    kind: str,
-    status_text: str,
-) -> None:
-    user_id = update.effective_user.id
-
-    if not _is_allowed(user_id):
-        await update.message.reply_text("⛔ 未授权")
-        return
-
-    try:
-        if kind == "chain":
-            default_min, default_max = 0, 60
-        elif kind == "puts":
-            default_min, default_max = 20, 45
-        else:
-            default_min, default_max = 15, 45
-        symbol, dte_min, dte_max = _parse_option_args(
-            context.args,
-            default_dte_min=default_min,
-            default_dte_max=default_max,
-        )
-    except ValueError as e:
-        await update.message.reply_text(
-            f"❌ <b>参数错误</b>\n<code>{str(e)}</code>",
-            parse_mode=ParseMode.HTML,
-        )
-        return
-
-    status_msg = await update.message.reply_text(status_text)
-
-    try:
-        if kind == "chain":
-            result = await asyncio.to_thread(
-                get_option_chain,
-                symbol,
-                dte_min,
-                dte_max,
-            )
-            reply = format_option_chain_summary(result)
-        elif kind == "puts":
-            result = await asyncio.to_thread(
-                scan_short_put_candidates,
-                symbol,
-                dte_min,
-                dte_max,
-            )
-            reply = format_option_candidates(result)
-        else:
-            result = await asyncio.to_thread(
-                scan_covered_call_candidates,
-                symbol,
-                dte_min,
-                dte_max,
-            )
-            reply = format_option_candidates(result)
-
-        await status_msg.delete()
-        for chunk in _split(reply):
-            try:
-                await update.message.reply_text(chunk, parse_mode=ParseMode.HTML)
-            except BadRequest:
-                await update.message.reply_text(chunk)
-    except Exception as e:
-        logger.exception("期权命令失败：%s", e)
-        await status_msg.edit_text(
-            f"❌ <b>请求失败</b>\n<code>{str(e)}</code>",
-            parse_mode=ParseMode.HTML,
-        )
-
-
-def _parse_option_args(args: list[str], *, default_dte_min: int, default_dte_max: int) -> tuple[str, int, int]:
-    if not args:
-        raise ValueError("请至少提供股票代码，例如 /options AAPL")
-
-    symbol = args[0].upper().strip()
-    if not symbol:
-        raise ValueError("股票代码不能为空")
-
-    if len(args) >= 2:
-        dte_min = int(args[1])
-    else:
-        dte_min = default_dte_min
-
-    if len(args) >= 3:
-        dte_max = int(args[2])
-    else:
-        dte_max = default_dte_max
-
-    if len(args) > 3:
-        raise ValueError("参数过多，格式示例：/puts AAPL 20 45")
-
-    return symbol, dte_min, dte_max
-
-
 def build_app() -> Application:
     app = Application.builder().token(TELEGRAM_BOT_TOKEN).build()
     app.add_handler(CommandHandler("start", cmd_start))
     app.add_handler(CommandHandler("report", cmd_report))
-    app.add_handler(CommandHandler("options", cmd_options))
-    app.add_handler(CommandHandler("puts", cmd_puts))
-    app.add_handler(CommandHandler("calls", cmd_calls))
     app.add_handler(CommandHandler("clear", cmd_clear))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
     return app
