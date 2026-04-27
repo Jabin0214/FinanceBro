@@ -6,7 +6,10 @@
 """
 
 import logging
+import re
+
 import requests
+
 from config import GROK_API_KEY
 
 logger = logging.getLogger(__name__)
@@ -15,22 +18,67 @@ _GROK_API_URL = "https://api.x.ai/v1/responses"
 _GROK_MODEL   = "grok-4-1-fast-reasoning"
 _TIMEOUT      = 120  # 风险分析搜索较多，给足时间
 
-_SYSTEM_PROMPT = """你是一位专业的投资组合风险分析师。
-用户会提供其 IBKR 账户的持仓结构和风险指标，你需要结合实时市场信息进行全面风险评估。
+_SYSTEM_PROMPT = """你是用户的私人理财顾问。用户是有一定基础但不是专业人士的散户投资者。
+基于用户的 IBKR 持仓和实时市场信息给出风险评估，要像在和朋友面对面解释一样：先讲结论，再讲数据，专业名词第一次出现时用一句大白话解释。
 
-分析维度：
-1. <b>总体风险评级</b>：低 / 中 / 高，一句话说明理由
-2. <b>集中度风险</b>：单一持仓或前几大持仓是否过度集中，HHI 指数解读
-3. <b>板块分布</b>：识别各持仓所属行业，判断行业集中度和相关性风险
-4. <b>当前市场风险</b>：搜索主要持仓的最新新闻，识别近期潜在风险因素
-5. <b>宏观风险</b>：结合当前宏观环境（利率、地缘、汇率等）对持仓的影响
-6. <b>具体建议</b>：针对高风险点给出可操作的风险缓释建议（1-3 条）
+请严格按以下七段输出，每段标题独占一行用 <b> 包裹，段落之间空一行：
 
-输出格式（严格遵守）：
-- 中文，简洁有力
-- 只用 <b>粗体</b> 和 <i>斜体</i> HTML 标签，禁用 Markdown 和表格
-- 数字加千位分隔符，百分比保留一位小数
-- 盈利用 🟢，亏损用 🔴，中性用 ⚪"""
+<b>一句话结论</b>
+风险等级（低 / 中 / 高）+ 当前最值得关注的一件事，不超过两句。
+
+<b>关键数字</b>
+3-5 行，每行一个核心指标，格式："指标名：数值，一句通俗解读"。
+例如："HHI 集中度：2,292（HHI 衡量分散度，1 万 = 全押一只股，3,000 以上算高度集中）"。
+
+<b>集中度风险</b>
+最大持仓和前五大占比说明了什么，是否需要调整。2-4 行。
+
+<b>行业与主题</b>
+钱主要压在哪些方向（科技 / 金融 / 现金替代等），相关性是否高。2-4 行。
+
+<b>个股近况</b>
+针对前几大持仓搜索近期事件，标注影响方向。每条 1 行，最多 4 条。
+
+<b>宏观环境</b>
+挑出对当前组合影响最大的 2-3 个宏观因素（利率 / 地缘 / 汇率等），不要泛泛而谈。
+
+<b>下一步动作</b>
+按优先级排：P1（本周内做）、P2（本月考虑）、P3（持续观察）。最多 3 条，每条具体到"减 / 加 / 盯什么、为什么"。
+
+输出格式（严格遵守，违反任何一条都属于错误输出）：
+1. 中文，简洁直接，不堆砌专业词。
+2. 只允许使用这两个 HTML 标签：<b>粗体</b>、<i>斜体</i>。其它 HTML 一律禁止。
+3. 严禁任何形式的引用标记：[1]、[[1]]、[[1]](https://...)、(source: ...)、<grok:render>、citation_id 等任何 XML / 方括号 / 内联链接形式。引用一律不要出现。
+4. 严禁 Markdown 语法：**、__、`、#、---、表格的 | 分隔符 等。
+5. 严禁出现任何 URL，无论是否包在标记里。
+6. emoji 只能用三种：🟢 健康 / 低风险，🔴 警示 / 高风险，⚪ 中性 / 观察。禁止使用 🟡 或其它彩色圆。
+7. 数字加千位分隔符（如 1,234,567），百分比保留一位小数（如 35.6%）。
+8. 段落之间一定要空一行。每段 2-4 行可读，不要一段写成一坨。"""
+
+
+# Defense-in-depth: Grok web_search/x_search often inserts citations even when
+# told not to. Strip them post-hoc so Telegram HTML parse never breaks and the
+# user never sees raw [[N]](url) / <grok:render> tags.
+_CITATION_PATTERNS = [
+    re.compile(r"<\s*g?\s*rok\s*:\s*render\b[^>]*>.*?<\s*/\s*g?\s*rok\s*:\s*render\s*>", re.DOTALL | re.IGNORECASE),
+    re.compile(r"<\s*g?\s*rok\s*:\s*render\b[^>]*/?>", re.IGNORECASE),
+    re.compile(r"<argument\s+name=\"citation_id\">\s*\d+\s*</argument>", re.IGNORECASE),
+    re.compile(r"\[\[\s*\d+\s*\]\]\([^)]*\)"),  # [[1]](url)
+    re.compile(r"\[\[\s*\d+\s*\]\]"),            # [[1]]
+    re.compile(r"\[\s*\d+\s*\]"),                 # [1]
+    re.compile(r"https?://\S+"),                  # any leftover URL
+]
+
+
+def _sanitize_output(text: str) -> str:
+    for pat in _CITATION_PATTERNS:
+        text = pat.sub("", text)
+    # 🟡 isn't allowed by the prompt; downgrade to ⚪ rather than drop entirely.
+    text = text.replace("🟡", "⚪")
+    # Collapse blank space introduced by removals.
+    text = re.sub(r"[ \t]+\n", "\n", text)
+    text = re.sub(r"\n{3,}", "\n\n", text)
+    return text.strip()
 
 
 def analyze_risk(metrics: dict) -> str:
@@ -80,7 +128,9 @@ def analyze_risk(metrics: dict) -> str:
             if result:
                 break
 
-        return result if result else "风险分析失败：返回内容为空"
+        if not result:
+            return "风险分析失败：返回内容为空"
+        return _sanitize_output(result)
 
     except requests.HTTPError as e:
         logger.error("Grok 风险分析请求失败: %s — %s", e, resp.text)

@@ -1,7 +1,13 @@
 {
   "permissions": {
     "allow": [
-      "WebFetch(domain:docs.x.ai)"
+      "WebFetch(domain:docs.x.ai)",
+      "Bash(python -c \"import ast; [ast.parse\\(open\\(f\\).read\\(\\)\\) for f in ['config.py','agent/tools.py','agent/orchestrator.py','bot/telegram_bot.py']]; print\\('syntax ok'\\)\")",
+      "Bash(python -c \"from agent.tools import TOOL_DEFINITIONS, execute_tool, set_active_user, reset_active_user, pop_pending_files; print\\('names:', [t['name'] for t in TOOL_DEFINITIONS]\\)\")",
+      "Bash(python -c ' *)",
+      "Bash(git add *)",
+      "Bash(git commit -m ' *)",
+      "Bash(gh pr *)"
     ]
   }
 }
