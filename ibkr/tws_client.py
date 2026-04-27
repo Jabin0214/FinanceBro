@@ -90,7 +90,13 @@ class TWSClient:
                 return
             logger.info("正在连接 IB Gateway %s:%d clientId=%d ...", host, port, client_id)
             future = asyncio.run_coroutine_threadsafe(
-                self._ib.connectAsync(host, port, clientId=client_id, timeout=15),
+                self._ib.connectAsync(
+                    host,
+                    port,
+                    clientId=client_id,
+                    timeout=15,
+                    readonly=True,
+                ),
                 self._loop,
             )
             try:
