@@ -23,4 +23,3 @@ GROK_API_KEY = os.getenv("GROK_API_KEY")
 
 # 模型分工
 ORCHESTRATOR_MODEL = "claude-sonnet-4-6"   # 调度 + 格式化
-ANALYZER_MODEL = "claude-opus-4-6"          # 深度分析（Phase 3+）
