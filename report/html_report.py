@@ -1,200 +1,8 @@
-"""
-IBKR 持仓报告 → Telegram HTML / Browser HTML
-
-纯 Python 生成，无需 AI，快速稳定。
-"""
+"""IBKR 持仓数据 → 浏览器深色主题 HTML 报表（纯 Python，无 AI）。"""
 
 from __future__ import annotations
 
 from html import escape
-
-MAX_MSG_LEN = 4000  # Telegram 上限 4096，留余量
-
-
-def build_report_messages(data: dict) -> list[str]:
-    """
-    将 parser.parse_flex_xml() 返回的 dict 转为 Telegram HTML 消息列表。
-    多个账户各成一段；超过 4000 字符自动分包。
-    """
-    accounts = data.get("accounts", [])
-    generated_at = data.get("generated_at", "")
-    report_date = data.get("report_date", "")
-
-    parts: list[str] = []
-
-    if len(accounts) > 1:
-        parts.append(_build_total_summary(accounts, report_date))
-
-    for acct in accounts:
-        parts.append(_build_account_section(acct))
-
-    if parts:
-        footer = f"\n<i>报告时间：{generated_at}</i>"
-        if len(parts[-1]) + len(footer) <= MAX_MSG_LEN:
-            parts[-1] += footer
-        else:
-            parts.append(footer)
-
-    result: list[str] = []
-    for part in parts:
-        result.extend(_split(part))
-
-    return result
-
-
-def _build_total_summary(accounts: list[dict], report_date: str) -> str:
-    if len({a["base_currency"] for a in accounts}) > 1:
-        lines = [f"<b>📊 分账户汇总</b>  <code>{escape(report_date)}</code>", ""]
-        for acct in accounts:
-            s = acct["summary"]
-            alias = escape(acct["alias"] or acct["account_id"])
-            base_ccy = escape(acct["base_currency"])
-            lines.append(f"  • <b>{alias}</b>　净值 {_money(s['net_liquidation'])} {base_ccy}")
-        return "\n".join(lines)
-
-    total_net_liq = sum(a["summary"]["net_liquidation"] for a in accounts)
-    total_pnl = sum(a["summary"]["total_unrealized_pnl_base"] for a in accounts)
-    total_cost = sum(a["summary"]["total_cost_base"] for a in accounts)
-    total_pnl_pct = (total_pnl / total_cost * 100) if total_cost else 0
-
-    base_ccy = accounts[0]["base_currency"] if accounts else "HKD"
-
-    lines = [
-        f"<b>📊 总账户汇总</b>  <code>{escape(report_date)}</code>",
-        "",
-        f"合计净值　{_money(total_net_liq)} {base_ccy}",
-        f"合计浮盈　{_pnl_str(total_pnl)} {base_ccy}　{_pct(total_pnl_pct)}",
-        "",
-    ]
-    for acct in accounts:
-        s = acct["summary"]
-        alias = escape(acct["alias"] or acct["account_id"])
-        lines.append(
-            f"  • <b>{alias}</b>　净值 {_money(s['net_liquidation'])} {acct['base_currency']}"
-        )
-
-    return "\n".join(lines)
-
-
-def _build_account_section(acct: dict) -> str:
-    account_id = acct["account_id"]
-    alias = acct["alias"] or account_id
-    base_ccy = acct["base_currency"]
-    s = acct["summary"]
-    positions = acct["positions"]
-    cash_balances = acct["cash_balances"]
-
-    lines: list[str] = []
-    safe_alias = escape(alias)
-    safe_account_id = escape(account_id)
-    title = f"<b>{safe_alias}</b>" if alias != account_id else f"<b>{safe_account_id}</b>"
-    lines += [
-        f"{'━' * 20}",
-        f"{title}  <code>{safe_account_id}</code>",
-        "",
-    ]
-
-    lines += [
-        "<b>账户概览</b>",
-        f"净值　　{_money(s['net_liquidation'])} {base_ccy}",
-        f"股票市值  {_money(s['stock_value_base'])} {base_ccy}",
-        f"现金　　{_money(s['cash_base'])} {base_ccy}",
-        f"浮动盈亏  {_pnl_str(s['total_unrealized_pnl_base'])} {base_ccy}　{_pct(s['total_unrealized_pnl_pct'])}",
-        "",
-    ]
-
-    if positions:
-        lines.append("<b>持仓明细</b>")
-        for pos in positions:
-            lines.append(_build_position_line(pos, base_ccy))
-        lines.append("")
-    else:
-        lines += ["<i>暂无持仓</i>", ""]
-
-    if cash_balances:
-        lines.append("<b>现金余额</b>")
-        for cb in cash_balances:
-            lines.append(
-                f"  {escape(cb['currency'])}　{_money(cb['ending_cash'])}　"
-                f"≈ {_money(cb['ending_cash_base'])} {base_ccy}"
-            )
-
-    return "\n".join(lines)
-
-
-def _build_position_line(pos: dict, base_ccy: str) -> str:
-    symbol = escape(pos["symbol"])
-    desc = escape(_truncate(pos["description"], 16))
-    currency = pos["currency"]
-    mv = pos["market_value"]
-    mv_base = pos["market_value_base"]
-    pnl = pos["unrealized_pnl"]
-    pnl_pct = pos["unrealized_pnl_pct"]
-    fx = pos["fx_rate"]
-
-    indicator = _pnl_indicator(pnl)
-
-    if currency != base_ccy and fx != 1.0:
-        mv_str = f"{_money(mv)} {currency}　≈ {_money(mv_base)} {base_ccy}"
-        pnl_str = f"{_pnl_str(pnl)} {currency}"
-    else:
-        mv_str = f"{_money(mv)} {base_ccy}"
-        pnl_str = f"{_pnl_str(pnl)} {base_ccy}"
-
-    return (
-        f"{indicator} <b>{symbol}</b> <i>{desc}</i>\n"
-        f"     市值 {mv_str}\n"
-        f"     浮盈 {pnl_str}　{_pct(pnl_pct)}"
-    )
-
-
-def _money(value: float) -> str:
-    return f"{value:,.2f}"
-
-
-def _pct(value: float) -> str:
-    sign = "+" if value >= 0 else ""
-    return f"({sign}{value:.2f}%)"
-
-
-def _pnl_str(value: float) -> str:
-    sign = "+" if value >= 0 else ""
-    return f"{sign}{value:,.2f}"
-
-
-def _pnl_indicator(value: float) -> str:
-    if value > 0:
-        return "🟢"
-    if value < 0:
-        return "🔴"
-    return "⚪"
-
-
-def _truncate(text: str, max_len: int) -> str:
-    return text if len(text) <= max_len else text[: max_len - 1] + "…"
-
-
-def _split(text: str) -> list[str]:
-    if len(text) <= MAX_MSG_LEN:
-        return [text]
-
-    parts = []
-    paragraphs = text.split("\n\n")
-    current = ""
-
-    for para in paragraphs:
-        candidate = (current + "\n\n" + para) if current else para
-        if len(candidate) <= MAX_MSG_LEN:
-            current = candidate
-        else:
-            if current:
-                parts.append(current)
-            current = para
-
-    if current:
-        parts.append(current)
-
-    return parts or [text[:MAX_MSG_LEN]]
 
 
 def build_html_file(data: dict, output_path: str) -> str:
@@ -995,6 +803,15 @@ def _sentiment_class(value: float) -> str:
     if value < 0:
         return "negative"
     return "neutral"
+
+
+def _money(value: float) -> str:
+    return f"{value:,.2f}"
+
+
+def _pnl_str(value: float) -> str:
+    sign = "+" if value >= 0 else ""
+    return f"{sign}{value:,.2f}"
 
 
 def _signed_pct(value: float) -> str:
