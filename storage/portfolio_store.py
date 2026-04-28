@@ -7,6 +7,72 @@ import json
 from storage import db
 
 
+def get_latest_snapshot(user_id: int) -> dict | None:
+    with db.connect() as conn:
+        row = conn.execute(
+            """
+            select *
+            from portfolio_snapshots
+            where user_id = ?
+            order by report_date desc, id desc
+            limit 1
+            """,
+            (user_id,),
+        ).fetchone()
+
+    return dict(row) if row else None
+
+
+def get_snapshot_dates(user_id: int, limit: int = 30) -> list[str]:
+    with db.connect() as conn:
+        rows = conn.execute(
+            """
+            select distinct report_date
+            from portfolio_snapshots
+            where user_id = ?
+            order by report_date desc
+            limit ?
+            """,
+            (user_id, limit),
+        ).fetchall()
+
+    return [row["report_date"] for row in rows]
+
+
+def get_position_history(user_id: int, symbol: str, limit: int = 30) -> list[dict]:
+    with db.connect() as conn:
+        rows = conn.execute(
+            """
+            select
+                ps.report_date,
+                ps.account_id,
+                pos.symbol,
+                pos.description,
+                pos.currency,
+                pos.asset_category,
+                pos.quantity,
+                pos.cost_price,
+                pos.mark_price,
+                pos.market_value,
+                pos.market_value_base,
+                pos.cost_basis,
+                pos.cost_basis_base,
+                pos.unrealized_pnl,
+                pos.unrealized_pnl_base,
+                pos.unrealized_pnl_pct,
+                pos.fx_rate
+            from position_snapshots pos
+            join portfolio_snapshots ps on ps.id = pos.snapshot_id
+            where ps.user_id = ? and upper(pos.symbol) = upper(?)
+            order by ps.report_date desc, ps.id desc
+            limit ?
+            """,
+            (user_id, symbol, limit),
+        ).fetchall()
+
+    return [dict(row) for row in rows]
+
+
 def save_portfolio_report(user_id: int, report: dict) -> list[int]:
     """Save a structured IBKR report and return saved account snapshot IDs."""
     report_date = report.get("report_date") or ""

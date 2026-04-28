@@ -99,6 +99,11 @@ docker compose logs -f
 | `IBKR_FLEX_QUERY_ID` | Flex Query ID（在 IBKR 后台创建）|
 | `ANTHROPIC_API_KEY` | Anthropic API Key |
 | `GROK_API_KEY` | xAI Grok API Key（[console.x.ai](https://console.x.ai)）|
+| `DAILY_SNAPSHOT_ENABLED` | 是否启用每日自动持仓快照（`true`/`false`；未设置时如有白名单用户则默认启用）|
+| `DAILY_SNAPSHOT_USER_ID` | 自动快照归属的 Telegram 用户 ID；未设置时使用 `TELEGRAM_ALLOWED_USERS` 第一个用户 |
+| `DAILY_SNAPSHOT_TIME` | 每日快照时间，24 小时制 `HH:MM`，默认 `07:00` |
+| `DAILY_SNAPSHOT_TIMEZONE` | 每日快照时区，默认 `Pacific/Auckland` |
+| `DAILY_SNAPSHOT_NOTIFY` | 自动快照成功/失败后是否 Telegram 通知，默认 `true` |
 
 ---
 
@@ -166,6 +171,8 @@ FinanceBro/
 ### Phase 5 — 跨天记忆（计划中）
 - SQLite 持久化对话历史，容器重建后保留
 - `/report` 拉取 IBKR 报表时保存每日账户 / 持仓 / 现金快照
+- 可配置每日自动从 IBKR 拉取持仓并保存快照
+- 提供基础历史查询接口，供后续 AI 历史分析工具使用
 - 原始结构化报表 JSON 入库，方便未来重算历史
 - 超长历史用 Sonnet 生成日摘要，作为 system prompt 背景（后续）
 

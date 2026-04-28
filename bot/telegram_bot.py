@@ -12,6 +12,7 @@ auto-invokes tools (portfolio, news, risk, report) as needed.
 from telegram.ext import Application, CommandHandler, MessageHandler, filters
 
 from bot.handlers import cmd_clear, cmd_report, cmd_start, handle_message
+from bot.scheduler import setup_jobs
 from config import TELEGRAM_BOT_TOKEN
 
 
@@ -21,4 +22,5 @@ def build_app() -> Application:
     app.add_handler(CommandHandler("report", cmd_report))
     app.add_handler(CommandHandler("clear", cmd_clear))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
+    setup_jobs(app)
     return app
