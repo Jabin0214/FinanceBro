@@ -47,14 +47,7 @@ async def cmd_report(update: Update, _context: ContextTypes.DEFAULT_TYPE) -> Non
 
     status_msg = await update.message.reply_text("⏳ 正在从 IBKR 获取报告，请稍候...")
     try:
-        data = fetch_flex_report()
-        save_portfolio_report(user_id, data)
-        report_date = data.get("report_date", "report").replace("-", "")
-        tmp_path = os.path.join(
-            tempfile.gettempdir(),
-            f"ibkr_report_{report_date}_{user_id}_{uuid4().hex[:8]}.html",
-        )
-        build_html_file(data, tmp_path)
+        data, report_date, tmp_path = await asyncio.to_thread(_prepare_report_file, user_id)
 
         await status_msg.delete()
         try:
@@ -72,6 +65,18 @@ async def cmd_report(update: Update, _context: ContextTypes.DEFAULT_TYPE) -> Non
             f"❌ <b>获取报告失败</b>\n<code>{e}</code>",
             parse_mode=ParseMode.HTML,
         )
+
+
+def _prepare_report_file(user_id: int) -> tuple[dict, str, str]:
+    data = fetch_flex_report()
+    save_portfolio_report(user_id, data)
+    report_date = data.get("report_date", "report").replace("-", "")
+    tmp_path = os.path.join(
+        tempfile.gettempdir(),
+        f"ibkr_report_{report_date}_{user_id}_{uuid4().hex[:8]}.html",
+    )
+    build_html_file(data, tmp_path)
+    return data, report_date, tmp_path
 
 
 async def cmd_clear(update: Update, _context: ContextTypes.DEFAULT_TYPE) -> None:

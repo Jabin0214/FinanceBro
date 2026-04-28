@@ -44,3 +44,31 @@ async def test_cmd_report_saves_portfolio_snapshot(monkeypatch, tmp_path):
 
     assert saved == [(42, report)]
     message.reply_document.assert_awaited_once()
+
+
+@pytest.mark.anyio
+async def test_cmd_report_runs_blocking_work_in_thread(monkeypatch, tmp_path):
+    calls = []
+    report_path = tmp_path / "report.html"
+    report_path.write_text("<html></html>", encoding="utf-8")
+
+    async def fake_to_thread(func, *args):
+        calls.append((func, args))
+        return {"report_date": "2026-04-28"}, "20260428", str(report_path)
+
+    monkeypatch.setattr(handlers, "is_allowed", lambda _user_id: True)
+    monkeypatch.setattr(handlers.asyncio, "to_thread", fake_to_thread)
+
+    status_msg = SimpleNamespace(delete=AsyncMock(), edit_text=AsyncMock())
+    message = SimpleNamespace(
+        reply_text=AsyncMock(return_value=status_msg),
+        reply_document=AsyncMock(),
+    )
+    update = SimpleNamespace(
+        effective_user=SimpleNamespace(id=42),
+        message=message,
+    )
+
+    await handlers.cmd_report(update, None)
+
+    assert calls == [(handlers._prepare_report_file, (42,))]

@@ -22,6 +22,12 @@ def _parse_daily_snapshot_time(raw: str, timezone: str) -> time:
 
 # Telegram
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
+TELEGRAM_ALLOW_ALL = os.getenv("TELEGRAM_ALLOW_ALL", "").lower() in {
+    "1",
+    "true",
+    "yes",
+    "on",
+}
 TELEGRAM_ALLOWED_USERS = [
     int(uid.strip())
     for uid in os.getenv("TELEGRAM_ALLOWED_USERS", "").split(",")

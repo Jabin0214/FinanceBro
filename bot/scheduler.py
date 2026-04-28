@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 
 from config import (
@@ -41,24 +42,45 @@ async def daily_snapshot_job(context) -> None:
         return
 
     try:
-        data = fetch_flex_report()
-        snapshot_ids = save_portfolio_report(user_id, data)
-        report_date = data.get("report_date", "unknown")
-        logger.info(
-            "daily IBKR snapshot saved for user %s report_date=%s accounts=%s",
-            user_id,
-            report_date,
-            len(snapshot_ids),
-        )
-        if DAILY_SNAPSHOT_NOTIFY:
-            await context.bot.send_message(
-                chat_id=user_id,
-                text=f"✅ 每日 IBKR 持仓快照已保存：{report_date}（{len(snapshot_ids)} 个账户）",
-            )
+        data, snapshot_ids = await asyncio.to_thread(_fetch_and_save_snapshot, user_id)
     except Exception as e:
         logger.exception("daily IBKR snapshot failed")
-        if DAILY_SNAPSHOT_NOTIFY:
-            await context.bot.send_message(
-                chat_id=user_id,
-                text=f"❌ 每日 IBKR 持仓快照失败：{e}",
-            )
+        await _notify(
+            context,
+            user_id,
+            f"❌ 每日 IBKR 持仓快照失败：{e}",
+        )
+        return
+
+    report_date = data.get("report_date", "unknown")
+    logger.info(
+        "daily IBKR snapshot saved for user %s report_date=%s accounts=%s",
+        user_id,
+        report_date,
+        len(snapshot_ids),
+    )
+    await _notify(
+        context,
+        user_id,
+        f"✅ 每日 IBKR 持仓快照已保存：{report_date}（{len(snapshot_ids)} 个账户）",
+    )
+
+
+def _fetch_and_save_snapshot(user_id: int) -> tuple[dict, list[int]]:
+    data = fetch_flex_report()
+    snapshot_ids = save_portfolio_report(user_id, data)
+    return data, snapshot_ids
+
+
+async def _notify(context, user_id: int, text: str) -> None:
+    if not DAILY_SNAPSHOT_NOTIFY:
+        return
+
+    try:
+        await context.bot.send_message(chat_id=user_id, text=text)
+    except Exception:
+        logger.info(
+            "daily snapshot notification failed for user %s",
+            user_id,
+            exc_info=True,
+        )

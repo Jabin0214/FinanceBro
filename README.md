@@ -94,7 +94,8 @@ docker compose logs -f
 | 变量 | 说明 |
 |------|------|
 | `TELEGRAM_BOT_TOKEN` | Telegram BotFather 给的 Token |
-| `TELEGRAM_ALLOWED_USERS` | 允许访问的用户 ID（逗号分隔，留空表示不限制）|
+| `TELEGRAM_ALLOWED_USERS` | 允许访问的用户 ID（逗号分隔）|
+| `TELEGRAM_ALLOW_ALL` | 显式允许所有 Telegram 用户访问（默认 `false`，仅建议本地测试使用）|
 | `IBKR_FLEX_TOKEN` | IBKR Flex Web Service Token |
 | `IBKR_FLEX_QUERY_ID` | Flex Query ID（在 IBKR 后台创建）|
 | `ANTHROPIC_API_KEY` | Anthropic API Key |

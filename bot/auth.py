@@ -1,8 +1,8 @@
-"""Telegram user whitelist."""
+"""Telegram user authorization."""
 
-from config import TELEGRAM_ALLOWED_USERS
+from config import TELEGRAM_ALLOW_ALL, TELEGRAM_ALLOWED_USERS
 
 
 def is_allowed(user_id: int) -> bool:
-    """Empty whitelist means unrestricted access."""
-    return not TELEGRAM_ALLOWED_USERS or user_id in TELEGRAM_ALLOWED_USERS
+    """Allow listed users, or everyone only when explicitly configured."""
+    return TELEGRAM_ALLOW_ALL or user_id in TELEGRAM_ALLOWED_USERS
