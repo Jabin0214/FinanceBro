@@ -70,7 +70,7 @@
 |------|------|
 | `/start` | 显示帮助 |
 | `/report` | 直接获取 IBKR 持仓 HTML 报告（不走 AI，省 token）|
-| `/clear` | 清除当前对话历史 |
+| `/clear` | 清除当前对话历史（SQLite 持久化记录） |
 | 普通文字消息 | 进入 Orchestrator 对话；持仓、新闻、风险等问题会自动调用对应工具 |
 
 ---
@@ -164,8 +164,10 @@ FinanceBro/
 - 自然语言触发 `get_risk_analysis` 工具（用户问"风险/集中度/健康度"等会自动调）
 
 ### Phase 5 — 跨天记忆（计划中）
-- 历史持久化（SQLite 或 JSON）
-- 超长历史用 Sonnet 生成日摘要，作为 system prompt 背景
+- SQLite 持久化对话历史，容器重建后保留
+- `/report` 拉取 IBKR 报表时保存每日账户 / 持仓 / 现金快照
+- 原始结构化报表 JSON 入库，方便未来重算历史
+- 超长历史用 Sonnet 生成日摘要，作为 system prompt 背景（后续）
 
 ### Phase 6 — 定时任务 + 主动推送（计划中）
 - 每日开盘前简报

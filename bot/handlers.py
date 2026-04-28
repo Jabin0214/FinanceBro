@@ -17,6 +17,7 @@ from bot.auth import is_allowed
 from bot.messaging import send_html_with_fallback, typing_indicator
 from ibkr.flex_query import fetch_flex_report
 from report.html_report import build_html_file
+from storage.portfolio_store import save_portfolio_report
 
 logger = logging.getLogger(__name__)
 
@@ -47,6 +48,7 @@ async def cmd_report(update: Update, _context: ContextTypes.DEFAULT_TYPE) -> Non
     status_msg = await update.message.reply_text("⏳ 正在从 IBKR 获取报告，请稍候...")
     try:
         data = fetch_flex_report()
+        save_portfolio_report(user_id, data)
         report_date = data.get("report_date", "report").replace("-", "")
         tmp_path = os.path.join(
             tempfile.gettempdir(),

@@ -1,15 +1,15 @@
-"""Per-user conversation history (in-memory, cleared on restart)."""
+"""Per-user conversation history."""
 
-_histories: dict[int, list[dict]] = {}
+from storage.memory import clear_history, get_history, set_history
 
 
 def get(user_id: int) -> list[dict]:
-    return _histories.get(user_id, [])
+    return get_history(user_id)
 
 
 def set(user_id: int, history: list[dict]) -> None:
-    _histories[user_id] = history
+    set_history(user_id, history)
 
 
 def clear(user_id: int) -> None:
-    _histories.pop(user_id, None)
+    clear_history(user_id)
