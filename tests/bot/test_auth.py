@@ -14,9 +14,10 @@ def _reload_auth(monkeypatch, **env):
     return importlib.reload(auth)
 
 
-def test_empty_whitelist_denies_by_default(monkeypatch):
+def test_default_private_user_is_allowed(monkeypatch):
     reloaded_auth = _reload_auth(monkeypatch)
 
+    assert reloaded_auth.is_allowed(8615575214) is True
     assert reloaded_auth.is_allowed(42) is False
 
 

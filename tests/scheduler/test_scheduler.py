@@ -32,6 +32,9 @@ def test_setup_jobs_skips_when_disabled(monkeypatch):
     job_queue = FakeJobQueue()
     app = SimpleNamespace(job_queue=job_queue)
     monkeypatch.setattr(scheduler, "DAILY_SNAPSHOT_ENABLED", False)
+    monkeypatch.setattr(scheduler, "PROACTIVE_BRIEF_ENABLED", False)
+    monkeypatch.setattr(scheduler, "PROACTIVE_ALERT_ENABLED", False)
+    monkeypatch.setattr(scheduler, "PROACTIVE_NEWS_ENABLED", False)
 
     scheduler.setup_jobs(app)
 
@@ -46,6 +49,9 @@ def test_setup_jobs_registers_daily_snapshot(monkeypatch):
     monkeypatch.setattr(scheduler, "DAILY_SNAPSHOT_ENABLED", True)
     monkeypatch.setattr(scheduler, "DAILY_SNAPSHOT_USER_ID", 42)
     monkeypatch.setattr(scheduler, "DAILY_SNAPSHOT_TIME", run_at)
+    monkeypatch.setattr(scheduler, "PROACTIVE_BRIEF_ENABLED", False)
+    monkeypatch.setattr(scheduler, "PROACTIVE_ALERT_ENABLED", False)
+    monkeypatch.setattr(scheduler, "PROACTIVE_NEWS_ENABLED", False)
 
     scheduler.setup_jobs(app)
 

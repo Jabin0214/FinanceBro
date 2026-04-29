@@ -17,11 +17,11 @@ def _reload_config(monkeypatch, **env):
     return importlib.reload(config)
 
 
-def test_daily_snapshot_defaults_to_disabled(monkeypatch):
+def test_daily_snapshot_defaults_to_private_user(monkeypatch):
     cfg = _reload_config(monkeypatch)
 
-    assert cfg.DAILY_SNAPSHOT_ENABLED is False
-    assert cfg.DAILY_SNAPSHOT_USER_ID is None
+    assert cfg.DAILY_SNAPSHOT_ENABLED is True
+    assert cfg.DAILY_SNAPSHOT_USER_ID == 8615575214
     assert cfg.DAILY_SNAPSHOT_TIME == time(7, 0, tzinfo=ZoneInfo("Pacific/Auckland"))
     assert cfg.DAILY_SNAPSHOT_NOTIFY is True
 

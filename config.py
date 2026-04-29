@@ -18,9 +18,13 @@ def _parse_bool(name: str, default: str) -> bool:
 # Telegram
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 TELEGRAM_ALLOW_ALL = False
+DEFAULT_TELEGRAM_USER_IDS = [8615575214]
 TELEGRAM_ALLOWED_USERS = [
     int(uid.strip())
-    for uid in os.getenv("TELEGRAM_ALLOWED_USERS", "").split(",")
+    for uid in os.getenv(
+        "TELEGRAM_ALLOWED_USERS",
+        ",".join(str(uid) for uid in DEFAULT_TELEGRAM_USER_IDS),
+    ).split(",")
     if uid.strip()
 ]
 
