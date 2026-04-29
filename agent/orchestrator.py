@@ -19,6 +19,7 @@ logger = logging.getLogger(__name__)
 _client: anthropic.Anthropic | None = None
 
 MAX_HISTORY = 20  # 滑动窗口大小（条数）
+MAX_TOOL_ROUNDS = 8
 
 SYSTEM_PROMPT = """你是 FinanceBro，用户的私人投资助手。
 
@@ -53,7 +54,7 @@ def chat(history: list[dict], user_message: str) -> tuple[str, list[dict], dict]
     history = history + [{"role": "user", "content": user_message}]
     total_input = total_cache_write = total_cache_read = total_output = 0
 
-    while True:
+    for _round in range(MAX_TOOL_ROUNDS):
         trimmed = _trim(history)
 
         response = _get_client().messages.create(
@@ -104,6 +105,8 @@ def chat(history: list[dict], user_message: str) -> tuple[str, list[dict], dict]
         reply = "".join(b.text for b in response.content if hasattr(b, "text"))
         history = history + [{"role": "assistant", "content": reply or "(无回复)"}]
         return reply or "(无回复)", _trim(history), _calc_usage(total_input, total_cache_write, total_cache_read, total_output)
+
+    raise RuntimeError("工具调用次数过多，请换个更具体的问题重试")
 
 
 def _calc_usage(input_tokens: int, cache_write: int, cache_read: int, output_tokens: int) -> dict:

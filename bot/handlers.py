@@ -13,7 +13,7 @@ from telegram.ext import ContextTypes
 from agent.orchestrator import chat
 from agent.tools import pop_pending_files, reset_active_user, set_active_user
 from bot import history
-from bot.auth import is_allowed
+from bot.auth import is_allowed, is_private_chat
 from bot.messaging import send_html_with_fallback, typing_indicator
 from ibkr.flex_query import fetch_flex_report
 from report.html_report import build_html_file
@@ -24,8 +24,21 @@ logger = logging.getLogger(__name__)
 _DENIED = "⛔ 未授权"
 
 
+def _is_authorized_private(update: Update) -> bool:
+    return (
+        update.effective_user is not None
+        and update.effective_chat is not None
+        and is_private_chat(update.effective_chat.type)
+        and is_allowed(update.effective_user.id)
+    )
+
+
+def _user_error_text() -> str:
+    return "请稍后重试；详细错误已写入服务日志。"
+
+
 async def cmd_start(update: Update, _context: ContextTypes.DEFAULT_TYPE) -> None:
-    if not is_allowed(update.effective_user.id):
+    if not _is_authorized_private(update):
         await update.message.reply_text(_DENIED)
         return
 
@@ -40,11 +53,11 @@ async def cmd_start(update: Update, _context: ContextTypes.DEFAULT_TYPE) -> None
 
 
 async def cmd_report(update: Update, _context: ContextTypes.DEFAULT_TYPE) -> None:
-    user_id = update.effective_user.id
-    if not is_allowed(user_id):
+    if not _is_authorized_private(update):
         await update.message.reply_text(_DENIED)
         return
 
+    user_id = update.effective_user.id
     status_msg = await update.message.reply_text("⏳ 正在从 IBKR 获取报告，请稍候...")
     try:
         data, report_date, tmp_path = await asyncio.to_thread(_prepare_report_file, user_id)
@@ -59,10 +72,10 @@ async def cmd_report(update: Update, _context: ContextTypes.DEFAULT_TYPE) -> Non
                 )
         finally:
             os.remove(tmp_path)
-    except Exception as e:
+    except Exception:
         logger.exception("获取报告失败")
         await status_msg.edit_text(
-            f"❌ <b>获取报告失败</b>\n<code>{e}</code>",
+            f"❌ <b>获取报告失败</b>\n<code>{_user_error_text()}</code>",
             parse_mode=ParseMode.HTML,
         )
 
@@ -80,21 +93,21 @@ def _prepare_report_file(user_id: int) -> tuple[dict, str, str]:
 
 
 async def cmd_clear(update: Update, _context: ContextTypes.DEFAULT_TYPE) -> None:
-    user_id = update.effective_user.id
-    if not is_allowed(user_id):
+    if not _is_authorized_private(update):
         await update.message.reply_text(_DENIED)
         return
 
+    user_id = update.effective_user.id
     history.clear(user_id)
     await update.message.reply_text("🗑 对话历史已清除")
 
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    user_id = update.effective_user.id
-    if not is_allowed(user_id):
+    if not _is_authorized_private(update):
         await update.message.reply_text(_DENIED)
         return
 
+    user_id = update.effective_user.id
     user_text = update.message.text.strip()
     if not user_text:
         return
@@ -114,10 +127,10 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
             await _flush_pending_files(update, user_id)
             await _send_usage_footer(update, usage)
 
-        except Exception as e:
+        except Exception:
             logger.exception("对话处理失败")
             await update.message.reply_text(
-                f"❌ <b>出错了</b>\n<code>{e}</code>",
+                f"❌ <b>出错了</b>\n<code>{_user_error_text()}</code>",
                 parse_mode=ParseMode.HTML,
             )
 

@@ -31,3 +31,10 @@ def test_whitelist_allows_only_listed_users(monkeypatch):
 
     assert reloaded_auth.is_allowed(42) is True
     assert reloaded_auth.is_allowed(99) is False
+
+
+def test_private_chat_is_required():
+    assert auth.is_private_chat("private") is True
+    assert auth.is_private_chat("group") is False
+    assert auth.is_private_chat("supergroup") is False
+    assert auth.is_private_chat("channel") is False

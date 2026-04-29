@@ -37,6 +37,7 @@ async def test_cmd_report_saves_portfolio_snapshot(monkeypatch, tmp_path):
     )
     update = SimpleNamespace(
         effective_user=SimpleNamespace(id=42),
+        effective_chat=SimpleNamespace(type="private"),
         message=message,
     )
 
@@ -66,9 +67,40 @@ async def test_cmd_report_runs_blocking_work_in_thread(monkeypatch, tmp_path):
     )
     update = SimpleNamespace(
         effective_user=SimpleNamespace(id=42),
+        effective_chat=SimpleNamespace(type="private"),
         message=message,
     )
 
     await handlers.cmd_report(update, None)
 
     assert calls == [(handlers._prepare_report_file, (42,))]
+
+
+@pytest.mark.anyio
+async def test_cmd_report_rejects_group_chat(monkeypatch):
+    monkeypatch.setattr(handlers, "is_allowed", lambda _user_id: True)
+    message = SimpleNamespace(reply_text=AsyncMock())
+    update = SimpleNamespace(
+        effective_user=SimpleNamespace(id=42),
+        effective_chat=SimpleNamespace(type="group"),
+        message=message,
+    )
+
+    await handlers.cmd_report(update, None)
+
+    message.reply_text.assert_awaited_once_with("⛔ 未授权")
+
+
+@pytest.mark.anyio
+async def test_cmd_report_rejects_update_without_user(monkeypatch):
+    monkeypatch.setattr(handlers, "is_allowed", lambda _user_id: True)
+    message = SimpleNamespace(reply_text=AsyncMock())
+    update = SimpleNamespace(
+        effective_user=None,
+        effective_chat=SimpleNamespace(type="private"),
+        message=message,
+    )
+
+    await handlers.cmd_report(update, None)
+
+    message.reply_text.assert_awaited_once_with("⛔ 未授权")

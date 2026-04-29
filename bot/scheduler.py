@@ -10,7 +10,17 @@ from config import (
     DAILY_SNAPSHOT_NOTIFY,
     DAILY_SNAPSHOT_TIME,
     DAILY_SNAPSHOT_USER_ID,
+    PROACTIVE_ALERT_ENABLED,
+    PROACTIVE_ALERT_TIME,
+    PROACTIVE_ALERT_USER_ID,
+    PROACTIVE_BRIEF_ENABLED,
+    PROACTIVE_BRIEF_TIME,
+    PROACTIVE_BRIEF_USER_ID,
+    PROACTIVE_NEWS_ENABLED,
+    PROACTIVE_NEWS_INTERVAL_MINUTES,
+    PROACTIVE_NEWS_USER_ID,
 )
+from bot.proactive import news_monitor_job, opening_brief_job, threshold_alert_job
 from ibkr.flex_query import fetch_flex_report
 from storage.portfolio_store import save_portfolio_report
 
@@ -18,21 +28,55 @@ logger = logging.getLogger(__name__)
 
 
 def setup_jobs(app) -> None:
-    if not DAILY_SNAPSHOT_ENABLED:
-        logger.info("daily portfolio snapshot disabled")
+    if not any([DAILY_SNAPSHOT_ENABLED, PROACTIVE_BRIEF_ENABLED, PROACTIVE_ALERT_ENABLED, PROACTIVE_NEWS_ENABLED]):
+        logger.info("scheduled jobs disabled")
         return
 
-    if DAILY_SNAPSHOT_USER_ID is None:
-        raise RuntimeError("DAILY_SNAPSHOT_USER_ID is required when daily snapshots are enabled")
     if app.job_queue is None:
         raise RuntimeError("JobQueue is unavailable; install python-telegram-bot[job-queue]")
 
-    app.job_queue.run_daily(
-        daily_snapshot_job,
-        time=DAILY_SNAPSHOT_TIME,
-        name="daily_portfolio_snapshot",
-    )
-    logger.info("daily portfolio snapshot scheduled at %s", DAILY_SNAPSHOT_TIME)
+    if DAILY_SNAPSHOT_ENABLED:
+        if DAILY_SNAPSHOT_USER_ID is None:
+            raise RuntimeError("DAILY_SNAPSHOT_USER_ID is required when daily snapshots are enabled")
+        app.job_queue.run_daily(
+            daily_snapshot_job,
+            time=DAILY_SNAPSHOT_TIME,
+            name="daily_portfolio_snapshot",
+        )
+        app.job_queue.run_once(
+            daily_snapshot_job,
+            when=10,
+            name="startup_portfolio_snapshot",
+        )
+        logger.info("daily portfolio snapshot scheduled at %s with startup catch-up", DAILY_SNAPSHOT_TIME)
+
+    if PROACTIVE_BRIEF_ENABLED:
+        if PROACTIVE_BRIEF_USER_ID is None:
+            raise RuntimeError("PROACTIVE_BRIEF_USER_ID is required when opening brief is enabled")
+        app.job_queue.run_daily(opening_brief_job, time=PROACTIVE_BRIEF_TIME, name="opening_brief")
+        logger.info("opening brief scheduled at %s", PROACTIVE_BRIEF_TIME)
+
+    if PROACTIVE_ALERT_ENABLED:
+        if PROACTIVE_ALERT_USER_ID is None:
+            raise RuntimeError("PROACTIVE_ALERT_USER_ID is required when threshold alerts are enabled")
+        app.job_queue.run_daily(
+            threshold_alert_job,
+            time=PROACTIVE_ALERT_TIME,
+            name="portfolio_threshold_alert",
+        )
+        logger.info("portfolio threshold alert scheduled at %s", PROACTIVE_ALERT_TIME)
+
+    if PROACTIVE_NEWS_ENABLED:
+        if PROACTIVE_NEWS_USER_ID is None:
+            raise RuntimeError("PROACTIVE_NEWS_USER_ID is required when news monitor is enabled")
+        interval_seconds = PROACTIVE_NEWS_INTERVAL_MINUTES * 60
+        app.job_queue.run_repeating(
+            news_monitor_job,
+            interval=interval_seconds,
+            first=60,
+            name="news_and_earnings_monitor",
+        )
+        logger.info("news and earnings monitor scheduled every %s minutes", PROACTIVE_NEWS_INTERVAL_MINUTES)
 
 
 async def daily_snapshot_job(context) -> None:

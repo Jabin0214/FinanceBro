@@ -76,6 +76,10 @@ def get_position_history(user_id: int, symbol: str, limit: int = 30) -> list[dic
 def save_portfolio_report(user_id: int, report: dict) -> list[int]:
     """Save a structured IBKR report and return saved account snapshot IDs."""
     report_date = report.get("report_date") or ""
+    accounts = report.get("accounts", [])
+    if not accounts:
+        raise ValueError("portfolio report contains no accounts")
+
     snapshot_ids: list[int] = []
 
     with db.transaction() as conn:
@@ -95,7 +99,7 @@ def save_portfolio_report(user_id: int, report: dict) -> list[int]:
             ),
         )
 
-        for account in report.get("accounts", []):
+        for account in accounts:
             summary = account.get("summary", {})
             snapshot_id = _upsert_snapshot(conn, user_id, report_date, account, summary)
             _replace_positions(conn, snapshot_id, account.get("positions", []))

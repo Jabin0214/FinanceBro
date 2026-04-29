@@ -10,10 +10,22 @@ from bot import scheduler
 
 class FakeJobQueue:
     def __init__(self):
-        self.calls = []
+        self.daily_calls = []
+        self.once_calls = []
 
     def run_daily(self, callback, time, name):
-        self.calls.append({"callback": callback, "time": time, "name": name})
+        self.daily_calls.append({"callback": callback, "time": time, "name": name})
+
+    def run_once(self, callback, when, name):
+        self.once_calls.append({"callback": callback, "when": when, "name": name})
+
+    def run_repeating(self, callback, interval, first, name):
+        self.once_calls.append({
+            "callback": callback,
+            "interval": interval,
+            "first": first,
+            "name": name,
+        })
 
 
 def test_setup_jobs_skips_when_disabled(monkeypatch):
@@ -23,7 +35,8 @@ def test_setup_jobs_skips_when_disabled(monkeypatch):
 
     scheduler.setup_jobs(app)
 
-    assert job_queue.calls == []
+    assert job_queue.daily_calls == []
+    assert job_queue.once_calls == []
 
 
 def test_setup_jobs_registers_daily_snapshot(monkeypatch):
@@ -36,13 +49,56 @@ def test_setup_jobs_registers_daily_snapshot(monkeypatch):
 
     scheduler.setup_jobs(app)
 
-    assert job_queue.calls == [
+    assert job_queue.daily_calls == [
         {
             "callback": scheduler.daily_snapshot_job,
             "time": run_at,
             "name": "daily_portfolio_snapshot",
         }
     ]
+    assert job_queue.once_calls == [
+        {
+            "callback": scheduler.daily_snapshot_job,
+            "when": 10,
+            "name": "startup_portfolio_snapshot",
+        }
+    ]
+
+
+def test_setup_jobs_registers_phase6_jobs(monkeypatch):
+    job_queue = FakeJobQueue()
+    app = SimpleNamespace(job_queue=job_queue)
+    brief_at = time(8, 30, tzinfo=ZoneInfo("Pacific/Auckland"))
+    alert_at = time(8, 35, tzinfo=ZoneInfo("Pacific/Auckland"))
+    monkeypatch.setattr(scheduler, "DAILY_SNAPSHOT_ENABLED", False)
+    monkeypatch.setattr(scheduler, "PROACTIVE_BRIEF_ENABLED", True)
+    monkeypatch.setattr(scheduler, "PROACTIVE_BRIEF_USER_ID", 42)
+    monkeypatch.setattr(scheduler, "PROACTIVE_BRIEF_TIME", brief_at)
+    monkeypatch.setattr(scheduler, "PROACTIVE_ALERT_ENABLED", True)
+    monkeypatch.setattr(scheduler, "PROACTIVE_ALERT_USER_ID", 42)
+    monkeypatch.setattr(scheduler, "PROACTIVE_ALERT_TIME", alert_at)
+    monkeypatch.setattr(scheduler, "PROACTIVE_NEWS_ENABLED", True)
+    monkeypatch.setattr(scheduler, "PROACTIVE_NEWS_USER_ID", 42)
+    monkeypatch.setattr(scheduler, "PROACTIVE_NEWS_INTERVAL_MINUTES", 120)
+
+    scheduler.setup_jobs(app)
+
+    assert {
+        "callback": scheduler.opening_brief_job,
+        "time": brief_at,
+        "name": "opening_brief",
+    } in job_queue.daily_calls
+    assert {
+        "callback": scheduler.threshold_alert_job,
+        "time": alert_at,
+        "name": "portfolio_threshold_alert",
+    } in job_queue.daily_calls
+    assert {
+        "callback": scheduler.news_monitor_job,
+        "interval": 7200,
+        "first": 60,
+        "name": "news_and_earnings_monitor",
+    } in job_queue.once_calls
 
 
 def test_setup_jobs_requires_user_id_when_enabled(monkeypatch):

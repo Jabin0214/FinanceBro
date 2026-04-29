@@ -1,5 +1,7 @@
 import json
 
+import pytest
+
 from storage import db
 from storage.portfolio_store import save_portfolio_report
 
@@ -92,3 +94,10 @@ def test_save_portfolio_report_replaces_same_day_snapshot_children(tmp_path, mon
     assert positions[0]["symbol"] == "MSFT"
     assert positions[0]["quantity"] == 3.0
     assert len(cash_rows) == 1
+
+
+def test_save_portfolio_report_rejects_empty_accounts(tmp_path, monkeypatch):
+    monkeypatch.setenv("FINANCEBRO_DB_PATH", str(tmp_path / "financebro.db"))
+
+    with pytest.raises(ValueError, match="accounts"):
+        save_portfolio_report(42, {"report_date": "2026-04-28", "accounts": []})

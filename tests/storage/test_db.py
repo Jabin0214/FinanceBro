@@ -21,3 +21,15 @@ def test_connect_initializes_schema(tmp_path, monkeypatch):
         "position_snapshots",
         "cash_snapshots",
     }.issubset(tables)
+
+
+def test_connect_configures_sqlite_for_bot_workload(tmp_path, monkeypatch):
+    db_path = tmp_path / "financebro.db"
+    monkeypatch.setenv("FINANCEBRO_DB_PATH", str(db_path))
+
+    with db.connect() as conn:
+        journal_mode = conn.execute("pragma journal_mode").fetchone()[0]
+        busy_timeout = conn.execute("pragma busy_timeout").fetchone()[0]
+
+    assert journal_mode == "wal"
+    assert busy_timeout >= 5000

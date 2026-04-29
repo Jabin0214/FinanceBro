@@ -105,6 +105,18 @@ docker compose logs -f
 | `DAILY_SNAPSHOT_TIME` | 每日快照时间，24 小时制 `HH:MM`，默认 `07:00` |
 | `DAILY_SNAPSHOT_TIMEZONE` | 每日快照时区，默认 `Pacific/Auckland` |
 | `DAILY_SNAPSHOT_NOTIFY` | 自动快照成功/失败后是否 Telegram 通知，默认 `true` |
+| `PROACTIVE_BRIEF_ENABLED` | 是否启用每日开盘前简报；默认跟随 `DAILY_SNAPSHOT_ENABLED` |
+| `PROACTIVE_BRIEF_USER_ID` | 开盘前简报接收人；默认跟随自动快照用户 |
+| `PROACTIVE_BRIEF_TIME` | 开盘前简报时间，默认 `08:30` |
+| `PROACTIVE_BRIEF_TIMEZONE` | 开盘前简报时区，默认跟随每日快照时区 |
+| `PROACTIVE_ALERT_ENABLED` | 是否启用持仓阈值预警；默认跟随 `DAILY_SNAPSHOT_ENABLED` |
+| `PROACTIVE_ALERT_USER_ID` | 阈值预警接收人；默认跟随自动快照用户 |
+| `PROACTIVE_ALERT_TIME` | 阈值预警检查时间，默认 `08:35` |
+| `PROACTIVE_ALERT_PNL_PCT` | 整体浮亏触发阈值，默认 `-5` |
+| `PROACTIVE_ALERT_POSITION_WEIGHT_PCT` | 单一持仓集中度触发阈值，默认 `35` |
+| `PROACTIVE_NEWS_ENABLED` | 是否启用重大新闻 / 财报提醒轮询，默认 `false` |
+| `PROACTIVE_NEWS_USER_ID` | 新闻 / 财报提醒接收人；默认跟随自动快照用户 |
+| `PROACTIVE_NEWS_INTERVAL_MINUTES` | 新闻 / 财报提醒轮询间隔，默认 `180` |
 
 ---
 
@@ -121,14 +133,15 @@ FinanceBro/
 │   ├── telegram_bot.py     # Application 装配（仅路由表）
 │   ├── handlers.py         # /start /report /clear + 普通消息 handler
 │   ├── auth.py             # 白名单
-│   ├── history.py          # per-user 对话历史（内存）
+│   ├── history.py          # per-user 对话历史（SQLite 持久化）
+│   ├── proactive.py        # Phase 6 开盘简报 / 新闻提醒 / 阈值预警
 │   └── messaging.py        # 长消息切分 / HTML 降级 / typing 心跳
 │
 ├── agent/                  # AI 层
 │   ├── orchestrator.py     # Supervisor: Sonnet tool-use 主循环
 │   ├── tools/              # 工具注册表（每个工具一个文件）
 │   │   ├── __init__.py     # TOOL_DEFINITIONS 聚合 + execute_tool 分派
-│   │   ├── portfolio.py    # get_portfolio + 共享 10min 缓存
+│   │   ├── portfolio.py    # get_portfolio + per-user 10min 缓存
 │   │   ├── report.py       # generate_report
 │   │   ├── news.py         # get_news（News Specialist Agent）
 │   │   ├── risk.py         # get_risk_analysis（Risk Analyst Agent）
@@ -155,7 +168,7 @@ FinanceBro/
 
 ### Phase 2 — AI 对话 + 持仓工具 ✅
 - 工具注册表（可扩展）+ Sonnet tool use 主循环
-- per-user 对话历史（内存），滑动窗口 `MAX_HISTORY=20`
+- per-user 对话历史（SQLite 持久化），滑动窗口 `MAX_HISTORY=20`
 - 裁剪时确保从普通 user 文本开始，避免破坏 `tool_use`/`tool_result` 配对
 - prompt caching（system prompt + 工具定义），每次回复显示 token 与费用
 - HTML 解析失败自动降级为纯文本
@@ -169,7 +182,7 @@ FinanceBro/
 - Risk Analyst Agent：先用 `risk_calculator` 算出结构化指标（HHI、集中度、币种敞口、盈亏分布），再交给 Grok 结合实时搜索给出建议
 - 自然语言触发 `get_risk_analysis` 工具（用户问"风险/集中度/健康度"等会自动调）
 
-### Phase 5 — 跨天记忆（计划中）
+### Phase 5 — 跨天记忆 ✅
 - SQLite 持久化对话历史，容器重建后保留
 - `/report` 拉取 IBKR 报表时保存每日账户 / 持仓 / 现金快照
 - 可配置每日自动从 IBKR 拉取持仓并保存快照
@@ -177,10 +190,10 @@ FinanceBro/
 - 原始结构化报表 JSON 入库，方便未来重算历史
 - 超长历史用 Sonnet 生成日摘要，作为 system prompt 背景（后续）
 
-### Phase 6 — 定时任务 + 主动推送（计划中）
-- 每日开盘前简报
-- 重大新闻即时推送
-- 持仓盈亏阈值预警 / 财报日提醒
+### Phase 6 — 定时任务 + 主动推送 ✅
+- 每日开盘前简报：拉取最新 IBKR 持仓、保存快照、推送净值 / 盈亏 / 集中度 / 主要持仓
+- 持仓盈亏阈值预警：按整体浮亏和单一持仓占比阈值主动提醒
+- 重大新闻 / 财报提醒：按主要持仓定时轮询 Grok 搜索并推送摘要（默认关闭，避免成本失控）
 
 ---
 

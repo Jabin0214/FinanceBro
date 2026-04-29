@@ -9,11 +9,12 @@ import json
 import logging
 import time
 
+from agent.tools._state import current_user_id
+
 logger = logging.getLogger(__name__)
 
 CACHE_TTL = 600  # 10 minutes
-_cache: dict | None = None
-_cache_ts: float = 0.0
+_cache: dict[int, tuple[dict, float]] = {}
 
 DEFINITION = {
     "name": "get_portfolio",
@@ -28,18 +29,20 @@ DEFINITION = {
 
 def get_cached_portfolio() -> dict:
     """Return portfolio data, hitting the IBKR API at most once per TTL window."""
-    global _cache, _cache_ts
     from ibkr.flex_query import fetch_flex_report
 
+    user_id = current_user_id()
     now = time.time()
-    if _cache and now - _cache_ts < CACHE_TTL:
-        logger.info("portfolio cache hit (%.0fs left)", CACHE_TTL - (now - _cache_ts))
-        return _cache
+    if user_id in _cache:
+        data, ts = _cache[user_id]
+        if now - ts < CACHE_TTL:
+            logger.info("portfolio cache hit for user %s (%.0fs left)", user_id, CACHE_TTL - (now - ts))
+            return data
 
-    logger.info("portfolio cache miss — fetching from IBKR")
-    _cache = fetch_flex_report()
-    _cache_ts = time.time()
-    return _cache
+    logger.info("portfolio cache miss for user %s — fetching from IBKR", user_id)
+    data = fetch_flex_report()
+    _cache[user_id] = (data, time.time())
+    return data
 
 
 def execute(_tool_input: dict) -> str:

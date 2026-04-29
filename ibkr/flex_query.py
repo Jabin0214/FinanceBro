@@ -39,7 +39,7 @@ def _request_report() -> str:
         params={"t": IBKR_FLEX_TOKEN, "q": IBKR_FLEX_QUERY_ID, "v": "3"},
         timeout=30,
     )
-    resp.raise_for_status()
+    _raise_for_status(resp, "请求")
 
     root = ET.fromstring(resp.text)
     status = root.findtext(".//Status")
@@ -63,7 +63,7 @@ def _download_report(reference_code: str) -> str:
             params={"q": reference_code, "t": IBKR_FLEX_TOKEN, "v": "3"},
             timeout=30,
         )
-        resp.raise_for_status()
+        _raise_for_status(resp, "下载")
 
         # 还没准备好时会返回 Status = Warn
         if "<Status>Warn</Status>" in resp.text:
@@ -83,3 +83,10 @@ def _download_report(reference_code: str) -> str:
         return resp.text
 
     raise RuntimeError("IBKR 报表下载超时，请稍后重试")
+
+
+def _raise_for_status(resp: requests.Response, action: str) -> None:
+    try:
+        resp.raise_for_status()
+    except requests.HTTPError as e:
+        raise RuntimeError(f"IBKR Flex {action}失败：HTTP {resp.status_code}") from e
