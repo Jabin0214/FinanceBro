@@ -23,7 +23,7 @@ def test_empty_whitelist_denies_by_default(monkeypatch):
 def test_allow_all_requires_explicit_escape_hatch(monkeypatch):
     reloaded_auth = _reload_auth(monkeypatch, TELEGRAM_ALLOW_ALL="true")
 
-    assert reloaded_auth.is_allowed(42) is True
+    assert reloaded_auth.is_allowed(42) is False
 
 
 def test_whitelist_allows_only_listed_users(monkeypatch):

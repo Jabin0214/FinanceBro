@@ -95,28 +95,13 @@ docker compose logs -f
 |------|------|
 | `TELEGRAM_BOT_TOKEN` | Telegram BotFather 给的 Token |
 | `TELEGRAM_ALLOWED_USERS` | 允许访问的用户 ID（逗号分隔）|
-| `TELEGRAM_ALLOW_ALL` | 显式允许所有 Telegram 用户访问（默认 `false`，仅建议本地测试使用）|
 | `IBKR_FLEX_TOKEN` | IBKR Flex Web Service Token |
 | `IBKR_FLEX_QUERY_ID` | Flex Query ID（在 IBKR 后台创建）|
 | `ANTHROPIC_API_KEY` | Anthropic API Key |
 | `GROK_API_KEY` | xAI Grok API Key（[console.x.ai](https://console.x.ai)）|
-| `DAILY_SNAPSHOT_ENABLED` | 是否启用每日自动持仓快照（`true`/`false`；未设置时如有白名单用户则默认启用）|
-| `DAILY_SNAPSHOT_USER_ID` | 自动快照归属的 Telegram 用户 ID；未设置时使用 `TELEGRAM_ALLOWED_USERS` 第一个用户 |
-| `DAILY_SNAPSHOT_TIME` | 每日快照时间，24 小时制 `HH:MM`，默认 `07:00` |
-| `DAILY_SNAPSHOT_TIMEZONE` | 每日快照时区，默认 `Pacific/Auckland` |
-| `DAILY_SNAPSHOT_NOTIFY` | 自动快照成功/失败后是否 Telegram 通知，默认 `true` |
-| `PROACTIVE_BRIEF_ENABLED` | 是否启用每日开盘前简报；默认跟随 `DAILY_SNAPSHOT_ENABLED` |
-| `PROACTIVE_BRIEF_USER_ID` | 开盘前简报接收人；默认跟随自动快照用户 |
-| `PROACTIVE_BRIEF_TIME` | 开盘前简报时间，默认 `08:30` |
-| `PROACTIVE_BRIEF_TIMEZONE` | 开盘前简报时区，默认跟随每日快照时区 |
-| `PROACTIVE_ALERT_ENABLED` | 是否启用持仓阈值预警；默认跟随 `DAILY_SNAPSHOT_ENABLED` |
-| `PROACTIVE_ALERT_USER_ID` | 阈值预警接收人；默认跟随自动快照用户 |
-| `PROACTIVE_ALERT_TIME` | 阈值预警检查时间，默认 `08:35` |
-| `PROACTIVE_ALERT_PNL_PCT` | 整体浮亏触发阈值，默认 `-5` |
-| `PROACTIVE_ALERT_POSITION_WEIGHT_PCT` | 单一持仓集中度触发阈值，默认 `35` |
 | `PROACTIVE_NEWS_ENABLED` | 是否启用重大新闻 / 财报提醒轮询，默认 `false` |
-| `PROACTIVE_NEWS_USER_ID` | 新闻 / 财报提醒接收人；默认跟随自动快照用户 |
-| `PROACTIVE_NEWS_INTERVAL_MINUTES` | 新闻 / 财报提醒轮询间隔，默认 `180` |
+
+固定产品默认值写在 `config.py`：自动快照 `07:00`、开盘前简报 `08:30`、阈值预警 `08:35`，时区均为 `Pacific/Auckland`；主动推送接收人使用 `TELEGRAM_ALLOWED_USERS` 的第一个用户；整体浮亏阈值为 `-5%`，单一持仓集中度阈值为 `35%`。
 
 ---
 
@@ -194,6 +179,133 @@ FinanceBro/
 - 每日开盘前简报：拉取最新 IBKR 持仓、保存快照、推送净值 / 盈亏 / 集中度 / 主要持仓
 - 持仓盈亏阈值预警：按整体浮亏和单一持仓占比阈值主动提醒
 - 重大新闻 / 财报提醒：按主要持仓定时轮询 Grok 搜索并推送摘要（默认关闭，避免成本失控）
+
+---
+
+## V2 Roadmap
+
+V2 的方向是从“问答式账户助手”升级为“长期投资工作台”：更重视历史、复盘、提醒和决策约束。下面是候选 Agent，按优先级排列。
+
+### 1. Portfolio Historian Agent
+
+定位：组合历史分析师，优先级最高。
+
+能力：
+- 基于 SQLite 快照回答“过去 7 / 30 / 90 天组合发生了什么变化”
+- 对比净值、现金、持仓、仓位、浮盈浮亏的历史变化
+- 找出主要盈亏贡献、加仓 / 减仓痕迹、组合主题漂移
+- 生成周报 / 月报复盘
+
+依赖：
+- 现有 `portfolio_snapshots`、`position_snapshots`、`cash_snapshots`
+- 需要新增历史聚合查询工具，例如 `get_portfolio_history`、`get_position_changes`
+
+### 2. Earnings Calendar Agent
+
+定位：财报日提醒与财报后总结。
+
+能力：
+- 根据当前持仓生成本周 / 本月财报日列表
+- 财报前提醒高仓位标的和潜在波动风险
+- 财报后总结收入、利润、指引、盘后反应和对持仓的影响
+- 接入 Phase 6 主动推送，在财报前自动提醒
+
+依赖：
+- 财报日数据源或搜索能力
+- 当前持仓权重，用来判断提醒优先级
+
+### 3. Trade Journal Agent
+
+定位：交易复盘助手。
+
+能力：
+- 记录买入 / 卖出理由、预期、风险点和复盘日期
+- 回看交易是否符合原计划
+- 识别行为模式：追高、过早止盈、亏损加仓、过度集中等
+- 生成个人投资习惯报告
+
+依赖：
+- 新增交易日志表
+- 可选接入 IBKR 交易记录；V2 初期可以先让用户手动记录
+
+### 4. Risk Sentinel Agent
+
+定位：主动风险哨兵。
+
+能力：
+- 把当前阈值预警升级成更智能的组合风险判断
+- 结合仓位、集中度、个股新闻、财报日、宏观事件判断风险等级
+- 在风险升高时主动提醒，而不是等用户发问
+- 跟踪同一风险是否已提醒，避免重复打扰
+
+依赖：
+- Phase 6 阈值预警
+- News Agent / Risk Analyst Agent
+- 风险事件去重和冷却时间机制
+
+### 5. Macro Regime Agent
+
+定位：宏观环境分析师。
+
+能力：
+- 跟踪利率、美元、通胀、就业、央行政策等宏观变量
+- 判断当前宏观环境对组合是顺风还是逆风
+- 每周输出宏观简报，并映射到当前持仓主题
+- 解释“为什么这周科技股 / 港股 / 汇率影响了我的组合”
+
+依赖：
+- Grok 实时搜索
+- 组合行业 / 币种 / 主题归因
+
+### 6. Rebalancing Agent
+
+定位：再平衡建议官。
+
+能力：
+- 支持用户设置目标约束：现金比例、单股上限、行业上限、币种上限
+- 定期检查当前组合与目标组合的偏离
+- 给出“需要减 / 加什么，减 / 加多少”的建议
+- 默认只做建议，不自动交易
+
+依赖：
+- 用户偏好配置表
+- 当前持仓与历史风险指标
+
+### 7. Watchlist Scout Agent
+
+定位：机会侦察员。
+
+能力：
+- 维护关注列表
+- 监控 watchlist 的新闻、财报、价格异动和估值变化
+- 对比 watchlist 与现有持仓，提醒潜在替代机会
+- 生成“本周值得关注”的候选清单
+
+依赖：
+- Watchlist 存储
+- 新闻 / 财报 / 市场数据源
+
+### 8. Tax & Realized PnL Agent
+
+定位：税务与已实现盈亏助手。
+
+能力：
+- 汇总已实现盈亏、股息、利息、费用
+- 按年度 / 月度生成税务辅助报表
+- 给 accountant 准备结构化导出
+
+依赖：
+- IBKR Flex Query 增加交易记录、已实现盈亏、股息和费用字段
+- 新增税务报表渲染
+
+### 推荐 V2 顺序
+
+1. Portfolio Historian Agent：直接复用现有快照数据，投入产出最高。
+2. Earnings Calendar Agent：和主动推送天然结合，用户感知强。
+3. Trade Journal Agent：让 FinanceBro 从查数据升级为投资复盘工具。
+4. Risk Sentinel Agent：把现有风险分析升级成主动守门员。
+
+V2 的产品目标：FinanceBro 不只回答“我现在怎么样”，还要告诉用户“我的组合正在怎么变化，我的投资行为正在形成什么模式”。
 
 ---
 
