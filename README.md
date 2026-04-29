@@ -70,6 +70,11 @@
 |------|------|
 | `/start` | 显示帮助 |
 | `/report` | 直接获取 IBKR 持仓 HTML 报告（不走 AI，省 token）|
+| `/risk` | 直接触发 Risk Analyst Agent，生成组合风险分析 |
+| `/news <关键词>` | 直接触发 News Agent，搜索新闻、财报、市场动态，例如 `/news AAPL earnings` |
+| `/brief` | 立即生成一次开盘前简报 |
+| `/alerts` | 立即检查持仓浮亏 / 集中度阈值预警 |
+| `/history` | 查看最近持仓快照日期 |
 | `/clear` | 清除当前对话历史（SQLite 持久化记录） |
 | 普通文字消息 | 进入 Orchestrator 对话；持仓、新闻、风险等问题会自动调用对应工具 |
 
