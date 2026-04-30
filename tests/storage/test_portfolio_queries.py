@@ -1,4 +1,5 @@
 from storage.portfolio_store import (
+    get_portfolio_history_summary,
     get_latest_snapshot,
     get_position_history,
     get_snapshot_dates,
@@ -32,6 +33,9 @@ def _position(symbol, quantity):
 
 
 def _report_with_positions(report_date, positions, net_liquidation=10000.0):
+    stock_value_base = sum(pos["market_value_base"] for pos in positions)
+    total_cost_base = sum(pos["cost_basis_base"] for pos in positions)
+    total_unrealized_pnl_base = sum(pos["unrealized_pnl_base"] for pos in positions)
     return {
         "report_date": report_date,
         "accounts": [
@@ -41,10 +45,10 @@ def _report_with_positions(report_date, positions, net_liquidation=10000.0):
                 "base_currency": "USD",
                 "summary": {
                     "net_liquidation": net_liquidation,
-                    "stock_value_base": 9000.0,
-                    "cash_base": 1000.0,
-                    "total_unrealized_pnl_base": 500.0,
-                    "total_cost_base": 8500.0,
+                    "stock_value_base": stock_value_base,
+                    "cash_base": net_liquidation - stock_value_base,
+                    "total_unrealized_pnl_base": total_unrealized_pnl_base,
+                    "total_cost_base": total_cost_base,
                     "total_unrealized_pnl_pct": 5.88,
                 },
                 "positions": positions,
@@ -91,3 +95,41 @@ def test_get_position_history_returns_symbol_rows_newest_first(tmp_path, monkeyp
     assert [row["report_date"] for row in rows] == ["2026-04-28", "2026-04-27"]
     assert [row["quantity"] for row in rows] == [3.0, 2.0]
     assert rows[0]["symbol"] == "AAPL"
+
+
+def test_get_portfolio_history_summary_compares_oldest_and_newest_snapshots(tmp_path, monkeypatch):
+    monkeypatch.setenv("FINANCEBRO_DB_PATH", str(tmp_path / "financebro.db"))
+    save_portfolio_report(
+        42,
+        _report_with_positions(
+            "2026-04-01",
+            [_position("AAPL", 2.0), _position("TSLA", 1.0)],
+            net_liquidation=10000.0,
+        ),
+    )
+    save_portfolio_report(
+        42,
+        _report_with_positions(
+            "2026-04-28",
+            [_position("AAPL", 5.0), _position("MSFT", 4.0)],
+            net_liquidation=12500.0,
+        ),
+    )
+
+    summary = get_portfolio_history_summary(42, days=30)
+
+    assert summary["period_days"] == 30
+    assert summary["snapshot_count"] == 2
+    assert summary["start_date"] == "2026-04-01"
+    assert summary["end_date"] == "2026-04-28"
+    assert summary["totals"]["net_liquidation"]["start"] == 10000.0
+    assert summary["totals"]["net_liquidation"]["end"] == 12500.0
+    assert summary["totals"]["net_liquidation"]["change"] == 2500.0
+    assert summary["totals"]["net_liquidation"]["change_pct"] == 25.0
+    assert summary["position_changes"][0]["symbol"] == "MSFT"
+    assert summary["position_changes"][0]["status"] == "opened"
+    assert summary["position_changes"][1]["symbol"] == "AAPL"
+    assert summary["position_changes"][1]["quantity_change"] == 3.0
+    assert summary["position_changes"][2]["symbol"] == "TSLA"
+    assert summary["position_changes"][2]["status"] == "closed"
+    assert summary["top_unrealized_pnl_contributors"][0]["symbol"] == "AAPL"
