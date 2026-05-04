@@ -108,6 +108,44 @@ def _init_schema(conn: sqlite3.Connection) -> None:
             ending_cash real not null default 0,
             ending_cash_base real not null default 0
         );
+
+        create table if not exists watchlist_items (
+            user_id integer not null,
+            symbol text not null,
+            note text not null default '',
+            status text not null default 'watching',
+            thesis text not null default '',
+            trigger_price real,
+            risk_note text not null default '',
+            created_at text not null default current_timestamp,
+            updated_at text not null default current_timestamp,
+            primary key (user_id, symbol)
+        );
+
+        create table if not exists investor_profiles (
+            user_id integer primary key,
+            risk_level text not null default 'balanced',
+            time_horizon text not null default 'medium',
+            max_position_weight_pct real not null default 35,
+            cash_floor_pct real not null default 5,
+            preferred_markets text not null default '',
+            notes text not null default '',
+            created_at text not null default current_timestamp,
+            updated_at text not null default current_timestamp
+        );
         """
     )
+    _ensure_column(conn, "watchlist_items", "status", "text not null default 'watching'")
+    _ensure_column(conn, "watchlist_items", "thesis", "text not null default ''")
+    _ensure_column(conn, "watchlist_items", "trigger_price", "real")
+    _ensure_column(conn, "watchlist_items", "risk_note", "text not null default ''")
     conn.commit()
+
+
+def _ensure_column(conn: sqlite3.Connection, table: str, column: str, definition: str) -> None:
+    columns = {
+        row["name"]
+        for row in conn.execute(f"pragma table_info({table})").fetchall()
+    }
+    if column not in columns:
+        conn.execute(f"alter table {table} add column {column} {definition}")

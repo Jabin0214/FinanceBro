@@ -81,7 +81,12 @@ async def test_cmd_brief_sends_opening_brief(monkeypatch):
     report = {"report_date": "2026-04-29", "accounts": [{"account_id": "U1"}]}
     monkeypatch.setattr(handlers, "is_allowed", lambda _user_id: True)
     monkeypatch.setattr(handlers.proactive, "_fetch_and_save", lambda user_id: report)
-    monkeypatch.setattr(handlers.proactive, "build_opening_brief", lambda data: f"brief {data['report_date']}")
+    monkeypatch.setattr(handlers, "get_investor_profile", lambda user_id: {"risk_level": "balanced"})
+    monkeypatch.setattr(
+        handlers.proactive,
+        "build_opening_brief",
+        lambda data, profile=None: f"brief {data['report_date']} {profile['risk_level']}",
+    )
     monkeypatch.setattr(
         handlers,
         "send_html_with_fallback",
@@ -90,7 +95,55 @@ async def test_cmd_brief_sends_opening_brief(monkeypatch):
 
     await handlers.cmd_brief(_update(), _context())
 
-    assert sent == ["brief 2026-04-29"]
+    assert sent == ["brief 2026-04-29 balanced"]
+
+
+@pytest.mark.anyio
+async def test_cmd_profile_updates_and_shows_profile(monkeypatch):
+    stored = []
+    sent = []
+    monkeypatch.setattr(handlers, "is_allowed", lambda _user_id: True)
+    monkeypatch.setattr(
+        handlers,
+        "update_investor_profile",
+        lambda user_id, **fields: stored.append((user_id, fields)),
+    )
+    monkeypatch.setattr(
+        handlers,
+        "get_investor_profile",
+        lambda user_id: {
+            "risk_level": "balanced",
+            "time_horizon": "medium",
+            "max_position_weight_pct": 30.0,
+            "cash_floor_pct": 8.0,
+            "preferred_markets": "US",
+            "notes": "learn slowly",
+        },
+    )
+    monkeypatch.setattr(
+        handlers,
+        "send_html_with_fallback",
+        AsyncMock(side_effect=lambda _message, text: sent.append(text)),
+    )
+
+    await handlers.cmd_profile(
+        _update(user_id=77),
+        _context(["set", "risk", "conservative", "max", "25", "cash", "12"]),
+    )
+    await handlers.cmd_profile(_update(user_id=77), _context())
+
+    assert stored == [
+        (
+            77,
+            {
+                "risk_level": "conservative",
+                "max_position_weight_pct": 25.0,
+                "cash_floor_pct": 12.0,
+            },
+        )
+    ]
+    assert "<b>投资画像</b>" in sent[-1]
+    assert "单一持仓上限：30.0%" in sent[-1]
 
 
 @pytest.mark.anyio
@@ -111,8 +164,9 @@ async def test_cmd_alerts_sends_no_alert_message(monkeypatch):
 
 
 @pytest.mark.anyio
-async def test_cmd_history_sends_portfolio_recap(monkeypatch):
+async def test_cmd_history_sends_historian_recap(monkeypatch):
     sent = []
+    analyzed = []
     monkeypatch.setattr(handlers, "is_allowed", lambda _user_id: True)
     monkeypatch.setattr(
         handlers,
@@ -138,15 +192,126 @@ async def test_cmd_history_sends_portfolio_recap(monkeypatch):
     )
     monkeypatch.setattr(
         handlers,
+        "analyze_history",
+        lambda summary: analyzed.append(summary) or "<b>一句话结论</b>\n历史复盘结果",
+    )
+    monkeypatch.setattr(
+        handlers,
         "send_html_with_fallback",
         AsyncMock(side_effect=lambda _message, text: sent.append(text)),
     )
 
     await handlers.cmd_history(_update(), _context())
 
-    assert "<b>组合复盘</b>" in sent[0]
-    assert "2026-04-01 至 2026-04-28" in sent[0]
-    assert "净值：$10,000.00 -> $12,500.00" in sent[0]
-    assert "现金：$1,500.00 -> $900.00" in sent[0]
-    assert "AAPL 加仓 3.00 股" in sent[0]
-    assert "TSLA 清仓 1.00 股" in sent[0]
+    assert analyzed[0]["period_days"] == 30
+    assert sent == ["<b>一句话结论</b>\n历史复盘结果"]
+
+
+@pytest.mark.anyio
+async def test_cmd_watchlist_adds_symbol_with_note(monkeypatch):
+    calls = []
+    monkeypatch.setattr(handlers, "is_allowed", lambda _user_id: True)
+    monkeypatch.setattr(
+        handlers,
+        "add_watchlist_item",
+        lambda user_id, symbol, note="": calls.append((user_id, symbol, note)),
+    )
+    update = _update(user_id=77)
+
+    await handlers.cmd_watchlist(update, _context(["add", "nvda", "AI", "infra"]))
+
+    assert calls == [(77, "nvda", "AI infra")]
+    update.message.reply_text.assert_awaited_once()
+    assert "NVDA" in update.message.reply_text.await_args.args[0]
+
+
+@pytest.mark.anyio
+async def test_cmd_watchlist_lists_items(monkeypatch):
+    sent = []
+    monkeypatch.setattr(handlers, "is_allowed", lambda _user_id: True)
+    monkeypatch.setattr(
+        handlers,
+        "list_watchlist_items",
+        lambda user_id: [
+            {
+                "symbol": "AAPL",
+                "note": "pullback",
+                "status": "waiting",
+                "thesis": "AI cycle",
+                "trigger_price": 175.0,
+                "risk_note": "valuation",
+            },
+            {
+                "symbol": "MSFT",
+                "note": "",
+                "status": "watching",
+                "thesis": "",
+                "trigger_price": None,
+                "risk_note": "",
+            },
+        ],
+    )
+    monkeypatch.setattr(
+        handlers,
+        "send_html_with_fallback",
+        AsyncMock(side_effect=lambda _message, text: sent.append(text)),
+    )
+
+    await handlers.cmd_watchlist(_update(), _context())
+
+    assert "<b>观察列表</b>" in sent[0]
+    assert "AAPL — waiting — pullback" in sent[0]
+    assert "买入/跟踪触发：175.0" in sent[0]
+    assert "风险点：valuation" in sent[0]
+    assert "MSFT" in sent[0]
+
+
+@pytest.mark.anyio
+async def test_cmd_watchlist_sets_research_fields(monkeypatch):
+    calls = []
+    monkeypatch.setattr(handlers, "is_allowed", lambda _user_id: True)
+    monkeypatch.setattr(
+        handlers,
+        "update_watchlist_research",
+        lambda user_id, symbol, **fields: calls.append((user_id, symbol, fields)),
+    )
+    update = _update(user_id=77)
+
+    await handlers.cmd_watchlist(
+        update,
+        _context(["set", "nvda", "status", "waiting", "trigger", "850", "risk", "valuation"]),
+    )
+
+    assert calls == [
+        (
+            77,
+            "nvda",
+            {
+                "status": "waiting",
+                "trigger_price": 850.0,
+                "risk_note": "valuation",
+            },
+        )
+    ]
+    update.message.reply_text.assert_awaited_once()
+    assert "NVDA" in update.message.reply_text.await_args.args[0]
+
+
+@pytest.mark.anyio
+async def test_cmd_scout_binds_user_and_sends_result(monkeypatch):
+    sent = []
+    bound = []
+    monkeypatch.setattr(handlers, "is_allowed", lambda _user_id: True)
+    monkeypatch.setattr(handlers, "set_active_user", lambda user_id: bound.append(user_id) or "token")
+    monkeypatch.setattr(handlers, "reset_active_user", lambda token: bound.append(token))
+    monkeypatch.setattr(handlers.watchlist_tool, "execute", lambda _input: "scout result")
+    monkeypatch.setattr(
+        handlers,
+        "send_html_with_fallback",
+        AsyncMock(side_effect=lambda _message, text: sent.append(text)),
+    )
+
+    await handlers.cmd_scout(_update(user_id=66), _context())
+
+    assert sent == ["scout result"]
+    assert bound == [66, "token"]

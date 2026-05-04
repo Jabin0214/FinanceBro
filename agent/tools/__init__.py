@@ -5,7 +5,7 @@ and an `execute(tool_input) -> str`. Adding a tool is a two-line change
 in `_TOOLS` below.
 """
 
-from agent.tools import history, news, portfolio, report, risk
+from agent.tools import history, news, portfolio, profile, report, risk, watchlist
 from agent.tools._state import (
     pop_pending_files,
     reset_active_user,
@@ -26,6 +26,8 @@ _TOOLS = {
     report.DEFINITION["name"]:    report.execute,
     news.DEFINITION["name"]:      news.execute,
     risk.DEFINITION["name"]:      risk.execute,
+    watchlist.DEFINITION["name"]: watchlist.execute,
+    profile.DEFINITION["name"]:   profile.execute,
 }
 
 TOOL_DEFINITIONS = [
@@ -34,6 +36,8 @@ TOOL_DEFINITIONS = [
     report.DEFINITION,
     news.DEFINITION,
     risk.DEFINITION,
+    watchlist.DEFINITION,
+    profile.DEFINITION,
 ]
 
 

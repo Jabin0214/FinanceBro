@@ -1,6 +1,6 @@
 # FinanceBro
 
-FinanceBro 是一个通过 Telegram 使用的私人投资助手，用来分析 Interactive Brokers (IBKR) 账户：实时持仓、HTML 报表、组合风险、历史复盘、每日快照和开盘前简报。
+FinanceBro 是一个通过 Telegram 使用的私人投资助手，用来分析 Interactive Brokers (IBKR) 账户：实时持仓、HTML 报表、组合风险、历史复盘、观察列表机会侦察、每日快照和开盘前简报。
 
 它采用 **Supervisor + Specialist** 多 Agent 架构：Claude Sonnet 负责对话和工具调度，Grok 专门处理实时新闻与风险分析，IBKR / SQLite / HTML 报表等确定性工作全部由 Python 工具完成。
 
@@ -8,7 +8,7 @@ FinanceBro 是一个通过 Telegram 使用的私人投资助手，用来分析 I
 
 ## 当前状态
 
-V1 已完成并可部署：
+V1.1 已完成并可部署。接下来不再优先新增 Agent，而是围绕现有核心入口继续打磨：
 
 - Telegram 私聊 Bot，带白名单鉴权
 - IBKR Flex Query 拉取持仓
@@ -16,13 +16,24 @@ V1 已完成并可部署：
 - Claude Orchestrator 对话入口
 - Grok News Agent
 - Grok Risk Analyst Agent
-- Portfolio Historian 工具，可回答 7 / 30 / 90 天组合变化
+- Portfolio Historian Agent，可回答 7 / 30 / 90 天组合变化并生成复盘
+- Watchlist Scout Agent，可维护观察列表并结合当前持仓搜索候选机会
+- 投资画像，可记录风险偏好、仓位上限、现金底线和偏好市场
 - SQLite 持久化对话历史、原始报表、账户快照、持仓快照、现金快照
 - 每日自动快照
 - 开盘前简报
 - 持仓阈值预警
 - 可选实验功能：重大新闻 / 财报提醒轮询
 - GitHub Actions 自动部署到 Oracle Cloud VM
+
+产品主线：
+
+- `/brief`：每日状态入口
+- `/profile`：个人投资纪律入口
+- `/risk`：组合脆弱点入口
+- `/history`：历史复盘入口
+- `/watchlist` + `/scout`：研究候选入口
+- `/report`：无 AI 成本的完整持仓兜底
 
 ---
 
@@ -36,8 +47,15 @@ V1 已完成并可部署：
 | `/report` | 获取 IBKR 持仓 HTML 报告，不走 AI |
 | `/risk` | 直接触发 Risk Analyst Agent |
 | `/news <关键词>` | 直接触发 News Agent，例如 `/news AAPL earnings` |
-| `/brief` | 立即生成一次开盘前简报，包含核心指标、主要持仓和风险提醒 |
+| `/brief` | 立即生成一次开盘前简报，包含核心指标、今天只看三件事、主要持仓和风险提醒 |
+| `/profile` | 查看投资画像 |
+| `/profile set risk conservative max 25 cash 12` | 更新风险偏好、单一持仓上限、现金底线等画像字段 |
 | `/history` | 查看最近 30 天组合复盘 |
+| `/watchlist` | 查看观察列表 |
+| `/watchlist add <代码> <备注>` | 添加或更新观察标的 |
+| `/watchlist set <代码> status waiting trigger 175 thesis <逻辑> risk <风险>` | 更新观察标的研究字段 |
+| `/watchlist remove <代码>` | 移除观察标的 |
+| `/scout` | 运行 Watchlist Scout Agent |
 | `/alerts` | 手动检查持仓浮亏 / 集中度阈值，主要用于临时排查 |
 | `/clear` | 清除当前 Telegram 用户的对话历史 |
 
@@ -57,6 +75,10 @@ V1 已完成并可部署：
 
 ```text
 过去 30 天我的组合发生了什么变化？
+```
+
+```text
+帮我看看观察列表里哪些值得继续跟踪
 ```
 
 ---
@@ -132,7 +154,7 @@ bot/telegram_bot.py
   v
 bot/handlers.py
   - 私聊 + 白名单鉴权
-  - /report /risk /news /brief /alerts /history /clear
+  - /report /risk /news /brief /profile /alerts /history /watchlist /scout /clear
   - 普通消息转给 Orchestrator
   |
   v
@@ -143,10 +165,12 @@ agent/orchestrator.py
   - token / cost 统计
   |
   +--> agent/tools/portfolio.py  -> IBKR Flex Query
-  +--> agent/tools/history.py    -> SQLite 历史快照聚合
+  +--> agent/tools/history.py    -> Portfolio Historian Agent + SQLite 历史快照聚合
   +--> agent/tools/report.py     -> HTML 报告
   +--> agent/tools/news.py       -> Grok web_search + x_search
   +--> agent/tools/risk.py       -> risk_calculator + Grok Risk Analyst
+  +--> agent/tools/watchlist.py  -> Watchlist Scout Agent + SQLite 观察列表
+  +--> agent/tools/profile.py    -> SQLite 投资画像
 ```
 
 后台任务：
@@ -176,6 +200,14 @@ storage/portfolio_store.py
   - position_snapshots
   - cash_snapshots
   - 历史聚合查询
+
+storage/watchlist_store.py
+  - watchlist_items
+  - per-user 观察列表与研究字段
+
+storage/investor_profile_store.py
+  - investor_profiles
+  - per-user 风险偏好、仓位上限、现金底线和偏好市场
 ```
 
 ---
@@ -188,6 +220,7 @@ storage/portfolio_store.py
 | 新闻搜索 | `grok-4-1-fast-reasoning` | 使用 `web_search` 和 `x_search` |
 | 风险分析 | `grok-4-1-fast-reasoning` | 结合风险指标和实时搜索 |
 | 历史复盘 | Python + Claude | SQLite 聚合历史快照，Claude 负责解释 |
+| 观察列表侦察 | Python + Grok | SQLite 维护 watchlist，Grok 搜索新闻和市场讨论 |
 | 报表渲染 | Python | 确定性 HTML 输出 |
 | 风险指标 | Python | HHI、集中度、币种敞口、盈亏分布 |
 | 数据持久化 | SQLite | 本地文件，Docker volume 持久化 |
@@ -217,7 +250,9 @@ FinanceBro/
 ├── agent/
 │   ├── orchestrator.py
 │   ├── analyzer.py
+│   ├── historian.py
 │   ├── risk_calculator.py
+│   ├── scout.py
 │   └── tools/
 │       ├── __init__.py
 │       ├── _state.py
@@ -225,7 +260,8 @@ FinanceBro/
 │       ├── history.py
 │       ├── report.py
 │       ├── news.py
-│       └── risk.py
+│       ├── risk.py
+│       └── watchlist.py
 │
 ├── ibkr/
 │   ├── flex_query.py
@@ -237,7 +273,8 @@ FinanceBro/
 ├── storage/
 │   ├── db.py
 │   ├── memory.py
-│   └── portfolio_store.py
+│   ├── portfolio_store.py
+│   └── watchlist_store.py
 │
 └── tests/
 ```
@@ -300,15 +337,28 @@ FinanceBro/
 - 阈值预警，可手动检查或随简报查看
 - 实验性新闻 / 财报轮询，默认关闭
 
-### Phase 7 — Portfolio Historian 工具
+### Phase 7 — Portfolio Historian Agent
 
 状态：完成
 
 - `get_portfolio_history` Orchestrator 工具
+- `agent/historian.py` Specialist Agent，将结构化历史摘要生成中文复盘
 - 支持 7 / 30 / 90 天历史窗口
 - 对比净值、股票市值、现金、浮盈和成本变化
 - 识别开仓、平仓、加仓、减仓
 - 汇总主要浮盈浮亏贡献
+- `/history` 直接触发 30 天 Portfolio Historian 复盘
+
+### Phase 8 — Watchlist Scout Agent
+
+状态：完成
+
+- `watchlist_items` SQLite 持久化观察列表
+- `/watchlist` 查看、添加、更新、移除观察标的
+- `/scout` 触发 Watchlist Scout Agent
+- `run_watchlist_scout` Orchestrator 工具
+- 结合 watchlist、当前持仓、实时新闻和 X 市场讨论生成候选观察
+- 对比观察标的与现有持仓的主题重叠和风险相关性
 
 ---
 
@@ -505,111 +555,81 @@ git diff --check
 
 ---
 
-## V2 Roadmap
+## 产品收敛方向
 
-V2 目标：从“问答式账户助手”升级成“长期投资工作台”，重点是历史、复盘、提醒和决策约束。
+FinanceBro 现在进入收敛阶段：不继续堆新 Agent，不追求覆盖所有投资场景，而是把已经完成的能力打磨得更可靠、更少打扰、更适合每天使用。
 
-### 1. Portfolio Historian Agent
+核心原则：
 
-状态：工具版已完成，后续可升级成更强的 Specialist Agent。
+- 日常入口少一点：优先让 `/brief`、`/risk`、`/history`、`/watchlist`、`/scout` 这几条路径足够好。
+- 确定性逻辑更强：IBKR 拉取、历史聚合、风险指标、watchlist 存储继续保持 Python 可测试实现。
+- AI 只做解释和归纳：模型负责把结构化数据讲清楚，不负责生成账务事实或替代数据库查询。
+- 主动推送保守：默认只保留每日快照、开盘简报和阈值提醒；新闻轮询仍是实验功能，避免噪音和成本失控。
+- 不新增自动交易：所有输出只做复盘、观察、提醒和研究建议。
 
-定位：组合历史分析师。
+### 当前核心能力
 
-能力：
+1. 开盘前简报
 
-- 回答过去 7 / 30 / 90 天组合变化
-- 对比净值、现金、持仓、仓位、浮盈浮亏
-- 找出主要盈亏贡献、加仓 / 减仓痕迹、主题漂移
-- 生成周报 / 月报复盘
+目标：每天一眼看清组合状态。
 
-依赖：
+强化方向：
 
-- `portfolio_snapshots`
-- `position_snapshots`
-- `cash_snapshots`
-- `get_portfolio_history` 历史聚合查询工具
+- 让 `/brief` 更像每日仪表盘，突出净值、浮盈亏、集中度、主要持仓和触发风险。
+- 减少重复文字，把“今天只看三件事”放在最前面，并按 `/profile` 的现金底线和单一持仓上限判断是否需要行动。
+- 后续可加入“相比上一快照变化”，但仍复用现有历史快照，不新建 Agent。
 
-### 2. Earnings Calendar Agent
+2. 风险分析
 
-定位：财报日提醒与财报后总结。
+目标：回答“这个组合现在哪里最脆弱”。
 
-能力：
+强化方向：
 
-- 根据当前持仓生成本周 / 本月财报日列表
-- 财报前提醒高仓位标的
-- 财报后总结收入、利润、指引、市场反应
-- 接入主动推送
+- 让 `/risk` 更稳定地区分集中度、主题相关性、币种敞口、浮亏压力。
+- 将 Grok 搜索结果限制在主要持仓和关键宏观变量，避免泛泛市场新闻。
+- 后续优先增强风险指标本身，而不是新增 Risk Sentinel Agent。
 
-### 3. Trade Journal Agent
+3. Portfolio Historian
 
-定位：交易复盘助手。
+目标：把历史快照变成真正的复盘。
 
-能力：
+强化方向：
 
-- 记录买入 / 卖出理由
-- 回看交易是否符合原计划
-- 识别追高、过早止盈、亏损加仓、过度集中等行为
-- 生成投资习惯报告
+- 强化 7 / 30 / 90 天复盘质量，解释净值、现金、仓位和浮盈亏变化。
+- 更清楚地区分“市场价格导致的市值变化”和“用户主动加仓 / 减仓”。
+- 后续可增强交易归因和主题漂移识别，但继续依赖 `portfolio_snapshots`、`position_snapshots`、`cash_snapshots`。
 
-### 4. Risk Sentinel Agent
+4. Watchlist Scout
 
-定位：主动风险哨兵。
+目标：让观察列表服务于研究，而不是变成另一个新闻流。
 
-能力：
+强化方向：
 
-- 将固定阈值升级成智能风险判断
-- 结合仓位、集中度、新闻、财报日、宏观事件
-- 风险升高时主动提醒
-- 对同类风险去重，避免重复打扰
+- `/watchlist` 保持轻量，只维护标的和备注。
+- `/watchlist` 可额外维护状态、关注逻辑、触发价和风险点。
+- `/scout` 聚焦候选观察、与现有持仓关系、近期催化和下一步研究动作，并把观察标的的研究字段传给模型。
+- 后续可增强价格异动和财报窗口提醒，但默认不做高频主动推送。
 
-### 5. Macro Regime Agent
+5. HTML 报表
 
-定位：宏观环境分析师。
+目标：保留一个稳定、无 AI 成本的完整持仓视图。
 
-能力：
+强化方向：
 
-- 跟踪利率、美元、通胀、就业、央行政策
-- 判断当前宏观环境对组合是顺风还是逆风
-- 输出每周宏观简报
+- `/report` 继续作为确定性兜底入口。
+- 报表只做清晰展示，不承载复杂交互或额外 AI 解读。
 
-### 6. Rebalancing Agent
+### 暂缓开发
 
-定位：再平衡建议官。
+以下方向先不做独立 Agent，除非现有核心能力已经明显不够用：
 
-能力：
+- Earnings Calendar Agent
+- Trade Journal Agent
+- Macro Regime Agent
+- Rebalancing Agent
+- Tax & Realized PnL Agent
 
-- 支持目标现金比例、单股上限、行业上限、币种上限
-- 检查当前组合偏离
-- 给出调整建议
-- 默认只建议，不自动交易
-
-### 7. Watchlist Scout Agent
-
-定位：机会侦察员。
-
-能力：
-
-- 维护关注列表
-- 监控新闻、财报、价格异动
-- 对比 watchlist 与现有持仓
-- 生成候选清单
-
-### 8. Tax & Realized PnL Agent
-
-定位：税务与已实现盈亏助手。
-
-能力：
-
-- 汇总已实现盈亏、股息、利息、费用
-- 按年度 / 月度生成税务辅助报表
-- 为 accountant 准备导出
-
-推荐顺序：
-
-1. Portfolio Historian Agent
-2. Earnings Calendar Agent
-3. Trade Journal Agent
-4. Risk Sentinel Agent
+如果未来确实要加入，也优先作为现有能力的增强项，例如把财报日作为 `/brief` 或 `/scout` 的一个字段，而不是再开一个新入口。
 
 ---
 

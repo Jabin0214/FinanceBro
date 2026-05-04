@@ -1,8 +1,8 @@
-"""get_portfolio_history tool — Portfolio Historian deterministic summary."""
+"""get_portfolio_history tool — Portfolio Historian Specialist Agent."""
 
-import json
 import logging
 
+from agent.historian import analyze_history
 from agent.tools._state import current_user_id
 from storage.portfolio_store import get_portfolio_history_summary
 
@@ -36,4 +36,4 @@ def execute(tool_input: dict) -> str:
 
     user_id = current_user_id()
     logger.info("get_portfolio_history — user=%s days=%s", user_id, days)
-    return json.dumps(get_portfolio_history_summary(user_id, days), ensure_ascii=False)
+    return analyze_history(get_portfolio_history_summary(user_id, days))

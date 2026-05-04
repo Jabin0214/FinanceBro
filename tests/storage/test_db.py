@@ -20,6 +20,8 @@ def test_connect_initializes_schema(tmp_path, monkeypatch):
         "portfolio_snapshots",
         "position_snapshots",
         "cash_snapshots",
+        "watchlist_items",
+        "investor_profiles",
     }.issubset(tables)
 
 

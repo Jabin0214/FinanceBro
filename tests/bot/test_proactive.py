@@ -48,12 +48,22 @@ def _report():
 
 
 def test_build_opening_brief_includes_core_metrics():
-    text = proactive.build_opening_brief(_report())
+    text = proactive.build_opening_brief(
+        _report(),
+        {
+            "risk_level": "conservative",
+            "max_position_weight_pct": 45.0,
+            "cash_floor_pct": 20.0,
+        },
+    )
 
     assert "<b>开盘前简报</b>" in text
     assert "2026-04-29" in text
     assert "净值：$10,000.00" in text
     assert "前五大持仓：100.0%" in text
+    assert "<b>今天只看三件事</b>" in text
+    assert "现金低于你的底线 20.0%" in text
+    assert "AAPL 单一持仓 62.5%" in text
     assert "<b>风险提醒</b>" in text
     assert "整体浮亏 -10.0%" in text
     assert "AAPL" in text
@@ -80,6 +90,11 @@ async def test_opening_brief_job_fetches_saves_and_sends(monkeypatch):
         proactive,
         "save_portfolio_report",
         lambda user_id, report: saved.append((user_id, report)) or [7],
+    )
+    monkeypatch.setattr(
+        proactive,
+        "get_investor_profile",
+        lambda user_id: {"max_position_weight_pct": 35.0, "cash_floor_pct": 5.0},
     )
 
     async def send_message(chat_id, text, parse_mode=None):

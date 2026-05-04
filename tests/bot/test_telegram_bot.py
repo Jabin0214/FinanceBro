@@ -38,5 +38,5 @@ def test_build_app_wires_token_handlers_and_jobs(monkeypatch):
     app = telegram_bot.build_app()
 
     assert app.token_value == "telegram-token"
-    assert len(app.handlers) == 9
+    assert len(app.handlers) == 12
     assert jobs == [app]

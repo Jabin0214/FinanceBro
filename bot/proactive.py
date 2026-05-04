@@ -18,6 +18,7 @@ from config import (
     PROACTIVE_NEWS_USER_ID,
 )
 from ibkr.flex_query import fetch_flex_report
+from storage.investor_profile_store import get_investor_profile
 from storage.portfolio_store import save_portfolio_report
 
 logger = logging.getLogger(__name__)
@@ -34,7 +35,8 @@ async def opening_brief_job(context) -> None:
 
     try:
         report = await asyncio.to_thread(_fetch_and_save, user_id)
-        await _send(context, user_id, build_opening_brief(report))
+        profile = await asyncio.to_thread(get_investor_profile, user_id)
+        await _send(context, user_id, build_opening_brief(report, profile))
     except Exception:
         logger.exception("opening brief failed")
         await _send(context, user_id, "❌ 开盘前简报生成失败，请稍后手动发送 /report 检查。")
@@ -104,11 +106,14 @@ async def news_monitor_job(context) -> None:
         await _send(context, user_id, "❌ 新闻与财报提醒检查失败。")
 
 
-def build_opening_brief(report: dict) -> str:
+def build_opening_brief(report: dict, profile: dict | None = None) -> str:
     metrics = compute_metrics(report)
     if "error" in metrics:
         return f"<b>开盘前简报</b>\n\n⚪ 暂无有效持仓数据：{metrics['error']}"
 
+    profile = profile or {}
+    max_position_weight = float(profile.get("max_position_weight_pct", PROACTIVE_ALERT_POSITION_WEIGHT_PCT) or PROACTIVE_ALERT_POSITION_WEIGHT_PCT)
+    cash_floor = float(profile.get("cash_floor_pct", 5.0) or 5.0)
     pnl = metrics["pnl_summary"]
     pnl_emoji = "🟢" if pnl["total_pnl_pct"] >= 0 else "🔴"
     top = metrics["concentration"][:5]
@@ -119,9 +124,10 @@ def build_opening_brief(report: dict) -> str:
     alerts = build_threshold_alerts(
         report,
         pnl_threshold_pct=PROACTIVE_ALERT_PNL_PCT,
-        position_weight_threshold_pct=PROACTIVE_ALERT_POSITION_WEIGHT_PCT,
+        position_weight_threshold_pct=max_position_weight,
     )
     alert_text = "\n".join(f"🔴 {alert}" for alert in alerts) if alerts else "🟢 未触发风险阈值"
+    focus_items = _brief_focus_items(metrics, report, cash_floor, max_position_weight)
 
     return (
         "<b>开盘前简报</b>\n\n"
@@ -130,11 +136,50 @@ def build_opening_brief(report: dict) -> str:
         f"{pnl_emoji} 整体浮动：{pnl['total_pnl_pct']:.1f}%"
         f"（${pnl['total_unrealized_pnl']:,.2f}）\n"
         f"前五大持仓：{metrics['top5_concentration_pct']:.1f}% · HHI：{metrics['hhi']:,.0f}\n\n"
+        "<b>今天只看三件事</b>\n"
+        + "\n".join(focus_items)
+        + "\n\n"
         "<b>主要持仓</b>\n"
         + "\n".join(top_lines)
         + "\n\n<b>风险提醒</b>\n"
         + alert_text
     )
+
+
+def _brief_focus_items(metrics: dict, report: dict, cash_floor_pct: float, max_position_weight_pct: float) -> list[str]:
+    items: list[str] = []
+    cash_ratio = _cash_ratio_pct(report)
+    if cash_ratio < cash_floor_pct:
+        items.append(f"🔴 现金低于你的底线 {cash_floor_pct:.1f}%：当前约 {cash_ratio:.1f}%")
+    else:
+        items.append(f"🟢 现金高于底线：当前约 {cash_ratio:.1f}%")
+
+    largest = metrics["concentration"][0]
+    if largest["weight_pct"] > max_position_weight_pct:
+        items.append(
+            f"🔴 {largest['symbol']} 单一持仓 {largest['weight_pct']:.1f}%：高于你的上限 {max_position_weight_pct:.1f}%"
+        )
+    else:
+        items.append(
+            f"🟢 最大持仓 {largest['symbol']} {largest['weight_pct']:.1f}%：未超过你的上限 {max_position_weight_pct:.1f}%"
+        )
+
+    pnl = metrics["pnl_summary"]
+    if pnl["total_pnl_pct"] <= PROACTIVE_ALERT_PNL_PCT:
+        items.append(f"🔴 整体浮亏 {pnl['total_pnl_pct']:.1f}%：先复盘原因，再考虑动作")
+    else:
+        items.append(f"⚪ 整体浮动 {pnl['total_pnl_pct']:.1f}%：今天不必因为噪音频繁操作")
+    return items[:3]
+
+
+def _cash_ratio_pct(report: dict) -> float:
+    net = 0.0
+    cash = 0.0
+    for account in report.get("accounts", []):
+        summary = account.get("summary", {})
+        net += float(summary.get("net_liquidation") or 0)
+        cash += float(summary.get("cash_base") or 0)
+    return (cash / net * 100) if net else 0.0
 
 
 def build_threshold_alerts(
