@@ -1,6 +1,6 @@
 # FinanceBro
 
-FinanceBro 是一个通过 Telegram 使用的私人投资助手，用来分析 Interactive Brokers (IBKR) 账户：实时持仓、HTML 报表、市场新闻、组合风险、历史复盘、每日快照、开盘前简报和主动预警。
+FinanceBro 是一个通过 Telegram 使用的私人投资助手，用来分析 Interactive Brokers (IBKR) 账户：实时持仓、HTML 报表、组合风险、历史复盘、每日快照和开盘前简报。
 
 它采用 **Supervisor + Specialist** 多 Agent 架构：Claude Sonnet 负责对话和工具调度，Grok 专门处理实时新闻与风险分析，IBKR / SQLite / HTML 报表等确定性工作全部由 Python 工具完成。
 
@@ -21,7 +21,7 @@ V1 已完成并可部署：
 - 每日自动快照
 - 开盘前简报
 - 持仓阈值预警
-- 可选重大新闻 / 财报提醒轮询
+- 可选实验功能：重大新闻 / 财报提醒轮询
 - GitHub Actions 自动部署到 Oracle Cloud VM
 
 ---
@@ -36,9 +36,9 @@ V1 已完成并可部署：
 | `/report` | 获取 IBKR 持仓 HTML 报告，不走 AI |
 | `/risk` | 直接触发 Risk Analyst Agent |
 | `/news <关键词>` | 直接触发 News Agent，例如 `/news AAPL earnings` |
-| `/brief` | 立即生成一次开盘前简报 |
-| `/alerts` | 立即检查持仓浮亏 / 集中度阈值 |
-| `/history` | 查看最近持仓快照日期 |
+| `/brief` | 立即生成一次开盘前简报，包含核心指标、主要持仓和风险提醒 |
+| `/history` | 查看最近 30 天组合复盘 |
+| `/alerts` | 手动检查持仓浮亏 / 集中度阈值，主要用于临时排查 |
 | `/clear` | 清除当前 Telegram 用户的对话历史 |
 
 自然语言也可以直接触发工具：
@@ -97,7 +97,7 @@ docker compose logs -f
 | `IBKR_FLEX_QUERY_ID` | IBKR Flex Query ID |
 | `ANTHROPIC_API_KEY` | Anthropic API Key |
 | `GROK_API_KEY` | xAI Grok API Key |
-| `PROACTIVE_NEWS_ENABLED` | 是否启用新闻 / 财报轮询，默认 `false` |
+| `PROACTIVE_NEWS_ENABLED` | 是否启用实验性的新闻 / 财报轮询，默认 `false` |
 
 产品默认值写在 `config.py`：
 
@@ -108,7 +108,7 @@ docker compose logs -f
 - 主动推送接收人：`TELEGRAM_ALLOWED_USERS` 的第一个用户
 - 整体浮亏阈值：`-5%`
 - 单一持仓集中度阈值：`35%`
-- 新闻 / 财报轮询间隔：`180` 分钟
+- 新闻 / 财报轮询间隔：`180` 分钟，默认关闭，建议只在需要主动监控时开启
 
 安全原则：
 
@@ -289,16 +289,16 @@ FinanceBro/
 - SQLite conversation history
 - raw IBKR report 入库
 - 账户 / 持仓 / 现金快照
-- `/history`
+- `/history` 30 天组合复盘摘要
 
 ### Phase 6 — 定时任务 + 主动推送
 
 状态：完成
 
 - 每日快照
-- 开盘前简报
-- 阈值预警
-- 可选新闻 / 财报轮询
+- 开盘前简报，包含风险提醒
+- 阈值预警，可手动检查或随简报查看
+- 实验性新闻 / 财报轮询，默认关闭
 
 ### Phase 7 — Portfolio Historian 工具
 
@@ -360,7 +360,7 @@ docker compose logs --tail=50
 常用命令：
 
 ```bash
-python -m pytest tests
+pytest -q
 ```
 
 ```bash

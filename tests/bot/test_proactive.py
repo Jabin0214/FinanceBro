@@ -54,6 +54,8 @@ def test_build_opening_brief_includes_core_metrics():
     assert "2026-04-29" in text
     assert "净值：$10,000.00" in text
     assert "前五大持仓：100.0%" in text
+    assert "<b>风险提醒</b>" in text
+    assert "整体浮亏 -10.0%" in text
     assert "AAPL" in text
 
 

@@ -111,10 +111,31 @@ async def test_cmd_alerts_sends_no_alert_message(monkeypatch):
 
 
 @pytest.mark.anyio
-async def test_cmd_history_lists_snapshot_dates(monkeypatch):
+async def test_cmd_history_sends_portfolio_recap(monkeypatch):
     sent = []
     monkeypatch.setattr(handlers, "is_allowed", lambda _user_id: True)
-    monkeypatch.setattr(handlers, "get_snapshot_dates", lambda user_id, limit=10: ["2026-04-29", "2026-04-28"])
+    monkeypatch.setattr(
+        handlers,
+        "get_portfolio_history_summary",
+        lambda user_id, days=30: {
+            "period_days": days,
+            "snapshot_count": 2,
+            "start_date": "2026-04-01",
+            "end_date": "2026-04-28",
+            "totals": {
+                "net_liquidation": {"start": 10000.0, "end": 12500.0, "change": 2500.0, "change_pct": 25.0},
+                "cash_base": {"start": 1500.0, "end": 900.0, "change": -600.0, "change_pct": -40.0},
+                "total_unrealized_pnl_base": {"start": 100.0, "end": 650.0, "change": 550.0, "change_pct": 550.0},
+            },
+            "position_changes": [
+                {"symbol": "AAPL", "status": "increased", "quantity_change": 3.0, "market_value_change_base": 1200.0},
+                {"symbol": "TSLA", "status": "closed", "quantity_change": -1.0, "market_value_change_base": -700.0},
+            ],
+            "top_unrealized_pnl_contributors": [
+                {"symbol": "AAPL", "unrealized_pnl_base": 650.0},
+            ],
+        },
+    )
     monkeypatch.setattr(
         handlers,
         "send_html_with_fallback",
@@ -123,5 +144,9 @@ async def test_cmd_history_lists_snapshot_dates(monkeypatch):
 
     await handlers.cmd_history(_update(), _context())
 
-    assert "2026-04-29" in sent[0]
-    assert "2026-04-28" in sent[0]
+    assert "<b>组合复盘</b>" in sent[0]
+    assert "2026-04-01 至 2026-04-28" in sent[0]
+    assert "净值：$10,000.00 -> $12,500.00" in sent[0]
+    assert "现金：$1,500.00 -> $900.00" in sent[0]
+    assert "AAPL 加仓 3.00 股" in sent[0]
+    assert "TSLA 清仓 1.00 股" in sent[0]

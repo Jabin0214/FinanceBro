@@ -7,7 +7,7 @@ Commands:
   /news    — search market news
   /brief   — generate opening brief now
   /alerts  — check threshold alerts now
-  /history — list recent portfolio snapshot dates
+  /history — summarize recent portfolio changes
   /clear   — clear current conversation history
 
 Plain text → routed to the Orchestrator agent (Claude Sonnet); the agent

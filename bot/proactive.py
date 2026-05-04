@@ -132,7 +132,7 @@ def build_opening_brief(report: dict) -> str:
         f"前五大持仓：{metrics['top5_concentration_pct']:.1f}% · HHI：{metrics['hhi']:,.0f}\n\n"
         "<b>主要持仓</b>\n"
         + "\n".join(top_lines)
-        + "\n\n<b>今日重点</b>\n"
+        + "\n\n<b>风险提醒</b>\n"
         + alert_text
     )
 

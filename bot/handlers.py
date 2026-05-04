@@ -20,7 +20,7 @@ from bot.auth import is_allowed, is_private_chat
 from bot.messaging import send_html_with_fallback, typing_indicator
 from ibkr.flex_query import fetch_flex_report
 from report.html_report import build_html_file
-from storage.portfolio_store import get_snapshot_dates, save_portfolio_report
+from storage.portfolio_store import get_portfolio_history_summary, save_portfolio_report
 
 logger = logging.getLogger(__name__)
 
@@ -54,7 +54,7 @@ async def cmd_start(update: Update, _context: ContextTypes.DEFAULT_TYPE) -> None
         "/news AAPL — 搜索新闻 / 财报 / 市场动态\n"
         "/brief  — 立即生成开盘前简报\n"
         "/alerts — 立即检查持仓阈值预警\n"
-        "/history — 查看最近快照日期\n"
+        "/history — 查看最近 30 天组合复盘\n"
         "/clear  — 清除对话历史",
         parse_mode=ParseMode.HTML,
     )
@@ -207,18 +207,93 @@ async def cmd_history(update: Update, _context: ContextTypes.DEFAULT_TYPE) -> No
 
     user_id = update.effective_user.id
     try:
-        dates = await asyncio.to_thread(get_snapshot_dates, user_id, 10)
-        if not dates:
+        summary = await asyncio.to_thread(get_portfolio_history_summary, user_id, 30)
+        if summary.get("snapshot_count", 0) == 0:
             await send_html_with_fallback(update.message, "暂无历史快照。先发送 /report 或等待每日自动快照。")
             return
-        text = "<b>最近持仓快照</b>\n\n" + "\n".join(f"• {date}" for date in dates)
-        await send_html_with_fallback(update.message, text)
+        await send_html_with_fallback(update.message, _format_history_recap(summary))
     except Exception:
         logger.exception("历史快照命令失败")
         await update.message.reply_text(
             f"❌ <b>历史快照查询失败</b>\n<code>{_user_error_text()}</code>",
             parse_mode=ParseMode.HTML,
         )
+
+
+def _format_history_recap(summary: dict) -> str:
+    days = summary.get("period_days", 30)
+    start_date = summary.get("start_date", "unknown")
+    end_date = summary.get("end_date", "unknown")
+    totals = summary.get("totals", {})
+
+    lines = [
+        "<b>组合复盘</b>",
+        "",
+        f"周期：过去 {days} 天（{start_date} 至 {end_date}）",
+        f"快照：{summary.get('snapshot_count', 0)} 个交易日",
+    ]
+
+    metric_lines = [
+        _format_change_line("净值", totals.get("net_liquidation")),
+        _format_change_line("现金", totals.get("cash_base")),
+        _format_change_line("浮盈亏", totals.get("total_unrealized_pnl_base")),
+    ]
+    lines.extend(line for line in metric_lines if line)
+
+    position_lines = _format_position_changes(summary.get("position_changes", []))
+    if position_lines:
+        lines.extend(["", "<b>主要持仓变化</b>", *position_lines])
+
+    contributor_lines = _format_pnl_contributors(summary.get("top_unrealized_pnl_contributors", []))
+    if contributor_lines:
+        lines.extend(["", "<b>主要浮盈亏贡献</b>", *contributor_lines])
+
+    return "\n".join(lines)
+
+
+def _format_change_line(label: str, change: dict | None) -> str:
+    if not change:
+        return ""
+    start = float(change.get("start") or 0)
+    end = float(change.get("end") or 0)
+    delta = float(change.get("change") or 0)
+    pct = change.get("change_pct")
+    pct_text = "n/a" if pct is None else f"{float(pct):+.1f}%"
+    return f"{label}：${start:,.2f} -> ${end:,.2f}（{delta:+,.2f}，{pct_text}）"
+
+
+def _format_position_changes(changes: list[dict]) -> list[str]:
+    status_labels = {
+        "opened": "开仓",
+        "closed": "清仓",
+        "increased": "加仓",
+        "decreased": "减仓",
+        "unchanged": "持仓不变",
+    }
+    lines = []
+    for item in changes[:5]:
+        symbol = item.get("symbol", "")
+        if not symbol:
+            continue
+        status = status_labels.get(item.get("status"), item.get("status", "变化"))
+        quantity = abs(float(item.get("quantity_change") or 0))
+        market_value_change = float(item.get("market_value_change_base") or 0)
+        lines.append(
+            f"{symbol} {status} {quantity:,.2f} 股"
+            f"（市值变化 {market_value_change:+,.2f}）"
+        )
+    return lines
+
+
+def _format_pnl_contributors(contributors: list[dict]) -> list[str]:
+    lines = []
+    for item in contributors[:3]:
+        symbol = item.get("symbol", "")
+        if not symbol:
+            continue
+        pnl = float(item.get("unrealized_pnl_base") or 0)
+        lines.append(f"{symbol}：{pnl:+,.2f}")
+    return lines
 
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
