@@ -5,6 +5,7 @@ import time
 
 import requests
 
+from agent.output_sanitizer import sanitize_model_output
 from config import GROK_API_KEY
 
 logger = logging.getLogger(__name__)
@@ -83,6 +84,7 @@ def _get_news(query: str) -> str:
         result = _extract_text(resp.json())
         if not result:
             return "新闻获取失败：返回内容为空"
+        result = sanitize_model_output(result)
         _cache[cache_key] = (result, time.time())
         return result
     except requests.HTTPError as e:

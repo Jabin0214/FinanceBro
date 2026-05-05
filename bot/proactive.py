@@ -19,7 +19,7 @@ from config import (
 )
 from ibkr.flex_query import fetch_flex_report
 from storage.investor_profile_store import get_investor_profile
-from storage.portfolio_store import save_portfolio_report
+from storage.portfolio_store import get_portfolio_history_summary, save_portfolio_report
 
 logger = logging.getLogger(__name__)
 
@@ -36,7 +36,8 @@ async def opening_brief_job(context) -> None:
     try:
         report = await asyncio.to_thread(_fetch_and_save, user_id)
         profile = await asyncio.to_thread(get_investor_profile, user_id)
-        await _send(context, user_id, build_opening_brief(report, profile))
+        history_summary = await asyncio.to_thread(get_portfolio_history_summary, user_id, 7)
+        await _send(context, user_id, build_opening_brief(report, profile, history_summary))
     except Exception:
         logger.exception("opening brief failed")
         await _send(context, user_id, "❌ 开盘前简报生成失败，请稍后手动发送 /report 检查。")
@@ -106,7 +107,11 @@ async def news_monitor_job(context) -> None:
         await _send(context, user_id, "❌ 新闻与财报提醒检查失败。")
 
 
-def build_opening_brief(report: dict, profile: dict | None = None) -> str:
+def build_opening_brief(
+    report: dict,
+    profile: dict | None = None,
+    history_summary: dict | None = None,
+) -> str:
     metrics = compute_metrics(report)
     if "error" in metrics:
         return f"<b>开盘前简报</b>\n\n⚪ 暂无有效持仓数据：{metrics['error']}"
@@ -128,6 +133,7 @@ def build_opening_brief(report: dict, profile: dict | None = None) -> str:
     )
     alert_text = "\n".join(f"🔴 {alert}" for alert in alerts) if alerts else "🟢 未触发风险阈值"
     focus_items = _brief_focus_items(metrics, report, cash_floor, max_position_weight)
+    recent_change_text = _format_recent_changes(history_summary)
 
     return (
         "<b>开盘前简报</b>\n\n"
@@ -138,6 +144,7 @@ def build_opening_brief(report: dict, profile: dict | None = None) -> str:
         f"前五大持仓：{metrics['top5_concentration_pct']:.1f}% · HHI：{metrics['hhi']:,.0f}\n\n"
         "<b>今天只看三件事</b>\n"
         + "\n".join(focus_items)
+        + recent_change_text
         + "\n\n"
         "<b>主要持仓</b>\n"
         + "\n".join(top_lines)
@@ -170,6 +177,51 @@ def _brief_focus_items(metrics: dict, report: dict, cash_floor_pct: float, max_p
     else:
         items.append(f"⚪ 整体浮动 {pnl['total_pnl_pct']:.1f}%：今天不必因为噪音频繁操作")
     return items[:3]
+
+
+def _format_recent_changes(history_summary: dict | None) -> str:
+    if not history_summary or int(history_summary.get("snapshot_count") or 0) < 2:
+        return ""
+
+    totals = history_summary.get("totals", {})
+    lines = ["", "", "<b>相比上次快照</b>"]
+    net_line = _format_change("净值", totals.get("net_liquidation"))
+    cash_line = _format_change("现金", totals.get("cash_base"))
+    if net_line:
+        lines.append(net_line)
+    if cash_line:
+        lines.append(cash_line)
+
+    action_lines = _format_position_actions(history_summary.get("position_changes", []))
+    lines.extend(action_lines[:3])
+    return "\n".join(lines) if len(lines) > 3 else ""
+
+
+def _format_change(label: str, change: dict | None) -> str:
+    if not change:
+        return ""
+    amount = float(change.get("change") or 0)
+    pct = change.get("change_pct")
+    sign = "+" if amount >= 0 else "-"
+    pct_text = "n/a" if pct is None else f"{float(pct):+.1f}%"
+    return f"{label}：{sign}${abs(amount):,.2f}（{pct_text}）"
+
+
+def _format_position_actions(changes: list[dict]) -> list[str]:
+    labels = {
+        "opened": "开仓",
+        "closed": "清仓",
+        "increased": "加仓",
+        "decreased": "减仓",
+    }
+    lines = []
+    for change in changes:
+        status = change.get("status")
+        if status not in labels:
+            continue
+        qty = float(change.get("quantity_change") or 0)
+        lines.append(f"{change.get('symbol', '')} {labels[status]} {abs(qty):.1f}")
+    return lines
 
 
 def _cash_ratio_pct(report: dict) -> float:

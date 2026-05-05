@@ -253,6 +253,10 @@ async def cmd_profile(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
             await update.message.reply_text("投资画像已更新。")
             return
 
+        if args and args[0].lower() == "setup":
+            await send_html_with_fallback(update.message, _format_profile_setup())
+            return
+
         profile = await asyncio.to_thread(get_investor_profile, user_id)
         await send_html_with_fallback(update.message, _format_profile(profile))
     except Exception:
@@ -371,6 +375,17 @@ def _format_profile(profile: dict) -> str:
         f"现金底线：{float(profile.get('cash_floor_pct', 5.0)):.1f}%\n"
         f"偏好市场：{escape(str(markets))}\n"
         f"备注：{escape(str(notes))}"
+    )
+
+
+def _format_profile_setup() -> str:
+    return (
+        "<b>投资画像设置</b>\n\n"
+        "先选一个风险偏好：conservative / balanced / aggressive\n"
+        "再设置单一持仓上限和现金底线。\n\n"
+        "常用模板：\n"
+        "<code>/profile set risk balanced max 35 cash 10 horizon medium markets US notes 想要解释更白话</code>\n\n"
+        "含义：max 是单一持仓上限，cash 是最低现金比例。之后 /brief 和 /risk 会按这套纪律提醒你。"
     )
 
 

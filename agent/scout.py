@@ -3,10 +3,10 @@
 from __future__ import annotations
 
 import logging
-import re
 
 import requests
 
+from agent.output_sanitizer import sanitize_model_output
 from config import GROK_API_KEY
 
 logger = logging.getLogger(__name__)
@@ -39,18 +39,6 @@ _SYSTEM_PROMPT = """你是 FinanceBro 的 Watchlist Scout，用户的观察列�
 3. 禁止 Markdown、表格、URL、引用标记。
 4. 不承诺收益，不提供直接买卖指令。"""
 
-_STRIP_PATTERNS = [
-    re.compile(r"\[\[\s*\d+\s*\]\]\([^)]*\)"),
-    re.compile(r"\[\[\s*\d+\s*\]\]"),
-    re.compile(r"\[\s*\d+\s*\]"),
-    re.compile(r"https?://\S+"),
-    re.compile(r"\*\*"),
-    re.compile(r"__"),
-    re.compile(r"`"),
-    re.compile(r"#+\s*"),
-]
-
-
 def analyze_watchlist(items: list[dict], portfolio: dict) -> str:
     if not items:
         return "观察列表为空。先发送 /watchlist add AAPL 这样的命令添加标的。"
@@ -81,7 +69,7 @@ def analyze_watchlist(items: list[dict], portfolio: dict) -> str:
         text = _extract_text(resp.json())
         if not text:
             return "Watchlist Scout 失败：返回内容为空。"
-        return _sanitize_output(text)
+        return sanitize_model_output(text)
     except requests.HTTPError as e:
         body = resp.text if resp is not None else ""
         logger.error("Watchlist Scout request failed: %s — %s", e, body)
@@ -149,12 +137,3 @@ def _extract_text(data: dict) -> str:
             if block.get("type") == "output_text":
                 return block.get("text", "")
     return ""
-
-
-def _sanitize_output(text: str) -> str:
-    for pattern in _STRIP_PATTERNS:
-        text = pattern.sub("", text)
-    text = re.sub(r"<(?!/?(?:b|i)\b)[^>]+>", "", text)
-    text = re.sub(r"[ \t]+\n", "\n", text)
-    text = re.sub(r"\n{3,}", "\n\n", text)
-    return text.strip()

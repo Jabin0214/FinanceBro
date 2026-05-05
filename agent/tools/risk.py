@@ -7,6 +7,8 @@ Pipeline: shared portfolio cache → risk_calculator (deterministic metrics)
 import logging
 
 from agent.tools.portfolio import get_cached_portfolio
+from agent.tools._state import current_user_id
+from storage.investor_profile_store import get_investor_profile
 
 logger = logging.getLogger(__name__)
 
@@ -31,4 +33,4 @@ def execute(_tool_input: dict) -> str:
         return f"风险分析失败：{metrics['error']}"
 
     logger.info("get_risk_analysis — invoking Grok analyst")
-    return analyze_risk(metrics)
+    return analyze_risk(metrics, get_investor_profile(current_user_id()))

@@ -147,6 +147,23 @@ async def test_cmd_profile_updates_and_shows_profile(monkeypatch):
 
 
 @pytest.mark.anyio
+async def test_cmd_profile_setup_shows_guided_template(monkeypatch):
+    sent = []
+    monkeypatch.setattr(handlers, "is_allowed", lambda _user_id: True)
+    monkeypatch.setattr(
+        handlers,
+        "send_html_with_fallback",
+        AsyncMock(side_effect=lambda _message, text: sent.append(text)),
+    )
+
+    await handlers.cmd_profile(_update(user_id=77), _context(["setup"]))
+
+    assert "<b>投资画像设置</b>" in sent[0]
+    assert "/profile set risk balanced max 35 cash 10" in sent[0]
+    assert "conservative" in sent[0]
+
+
+@pytest.mark.anyio
 async def test_cmd_alerts_sends_no_alert_message(monkeypatch):
     sent = []
     monkeypatch.setattr(handlers, "is_allowed", lambda _user_id: True)

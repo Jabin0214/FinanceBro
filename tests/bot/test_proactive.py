@@ -69,6 +69,29 @@ def test_build_opening_brief_includes_core_metrics():
     assert "AAPL" in text
 
 
+def test_build_opening_brief_includes_recent_snapshot_changes():
+    text = proactive.build_opening_brief(
+        _report(),
+        {"max_position_weight_pct": 45.0, "cash_floor_pct": 20.0},
+        {
+            "snapshot_count": 2,
+            "totals": {
+                "net_liquidation": {"change": -500.0, "change_pct": -4.8},
+                "cash_base": {"change": 300.0, "change_pct": 25.0},
+            },
+            "position_changes": [
+                {"symbol": "AAPL", "status": "increased", "quantity_change": 2.0},
+                {"symbol": "TSLA", "status": "closed", "quantity_change": -1.0},
+            ],
+        },
+    )
+
+    assert "<b>相比上次快照</b>" in text
+    assert "净值：-$500.00（-4.8%）" in text
+    assert "现金：+$300.00（+25.0%）" in text
+    assert "AAPL 加仓 2.0" in text
+
+
 def test_build_threshold_alerts_flags_loss_and_concentration():
     alerts = proactive.build_threshold_alerts(
         _report(),
@@ -95,6 +118,11 @@ async def test_opening_brief_job_fetches_saves_and_sends(monkeypatch):
         proactive,
         "get_investor_profile",
         lambda user_id: {"max_position_weight_pct": 35.0, "cash_floor_pct": 5.0},
+    )
+    monkeypatch.setattr(
+        proactive,
+        "get_portfolio_history_summary",
+        lambda user_id, days: {"snapshot_count": 0},
     )
 
     async def send_message(chat_id, text, parse_mode=None):

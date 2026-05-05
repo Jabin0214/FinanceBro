@@ -6,10 +6,10 @@
 """
 
 import logging
-import re
 
 import requests
 
+from agent.output_sanitizer import sanitize_model_output
 from config import GROK_API_KEY
 
 logger = logging.getLogger(__name__)
@@ -56,32 +56,7 @@ _SYSTEM_PROMPT = """你是用户的私人理财顾问。用户是有一定基础
 8. 段落之间一定要空一行。每段 2-4 行可读，不要一段写成一坨。"""
 
 
-# Defense-in-depth: Grok web_search/x_search often inserts citations even when
-# told not to. Strip them post-hoc so Telegram HTML parse never breaks and the
-# user never sees raw [[N]](url) / <grok:render> tags.
-_CITATION_PATTERNS = [
-    re.compile(r"<\s*g?\s*rok\s*:\s*render\b[^>]*>.*?<\s*/\s*g?\s*rok\s*:\s*render\s*>", re.DOTALL | re.IGNORECASE),
-    re.compile(r"<\s*g?\s*rok\s*:\s*render\b[^>]*/?>", re.IGNORECASE),
-    re.compile(r"<argument\s+name=\"citation_id\">\s*\d+\s*</argument>", re.IGNORECASE),
-    re.compile(r"\[\[\s*\d+\s*\]\]\([^)]*\)"),  # [[1]](url)
-    re.compile(r"\[\[\s*\d+\s*\]\]"),            # [[1]]
-    re.compile(r"\[\s*\d+\s*\]"),                 # [1]
-    re.compile(r"https?://\S+"),                  # any leftover URL
-]
-
-
-def _sanitize_output(text: str) -> str:
-    for pat in _CITATION_PATTERNS:
-        text = pat.sub("", text)
-    # 🟡 isn't allowed by the prompt; downgrade to ⚪ rather than drop entirely.
-    text = text.replace("🟡", "⚪")
-    # Collapse blank space introduced by removals.
-    text = re.sub(r"[ \t]+\n", "\n", text)
-    text = re.sub(r"\n{3,}", "\n\n", text)
-    return text.strip()
-
-
-def analyze_risk(metrics: dict) -> str:
+def analyze_risk(metrics: dict, profile: dict | None = None) -> str:
     """
     调用 Grok 对持仓进行风险分析。
 
@@ -91,7 +66,7 @@ def analyze_risk(metrics: dict) -> str:
     if not GROK_API_KEY:
         return "错误：未配置 GROK_API_KEY，无法进行风险分析。"
 
-    user_content = _build_prompt(metrics)
+    user_content = _build_prompt(metrics, profile)
 
     payload = {
         "model": _GROK_MODEL,
@@ -130,7 +105,7 @@ def analyze_risk(metrics: dict) -> str:
 
         if not result:
             return "风险分析失败：返回内容为空"
-        return _sanitize_output(result)
+        return sanitize_model_output(result)
 
     except requests.HTTPError as e:
         logger.error("Grok 风险分析请求失败: %s — %s", e, resp.text)
@@ -140,7 +115,7 @@ def analyze_risk(metrics: dict) -> str:
         return f"风险分析失败：{e}"
 
 
-def _build_prompt(metrics: dict) -> str:
+def _build_prompt(metrics: dict, profile: dict | None = None) -> str:
     """将结构化风险指标格式化为 Grok 的 user message。"""
     pnl = metrics["pnl_summary"]
     pnl_sign = "+" if pnl["total_pnl_pct"] >= 0 else ""
@@ -183,6 +158,19 @@ def _build_prompt(metrics: dict) -> str:
     if loser:
         l_pct = loser['unrealized_pnl_pct']
         lines.append(f"最大输家：{loser['symbol']} ({'+' if l_pct >= 0 else ''}{l_pct}%)")
+
+    if profile:
+        lines += [
+            "",
+            "【用户投资画像】",
+            f"风险偏好：{profile.get('risk_level', 'balanced')}",
+            f"投资期限：{profile.get('time_horizon', 'medium')}",
+            f"单一持仓上限：{profile.get('max_position_weight_pct', '未设置')}%",
+            f"现金底线：{profile.get('cash_floor_pct', '未设置')}%",
+            f"偏好市场：{profile.get('preferred_markets') or '未设置'}",
+            f"备注：{profile.get('notes') or '无'}",
+            "请明确判断当前组合是否符合这套纪律，偏离时说明轻重程度。",
+        ]
 
     lines += [
         "",
