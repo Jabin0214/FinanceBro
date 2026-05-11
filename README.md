@@ -467,7 +467,7 @@ git diff --check
 1. 业务逻辑放在 `bot/proactive.py` 或独立模块
 2. `bot/scheduler.py` 只负责注册 job
 3. 配置默认值尽量写在 `config.py`
-4. 如果会主动发 Telegram，要做去重或冷却
+4. 如果会主动发 Telegram，必须用 `bot.triggers.Trigger` 做冷却 / 去重，状态持久化到 `trigger_fires` 表，重启不丢
 5. 失败要记录日志，不要让 job crash 整个 bot
 6. 测试 `run_daily` / `run_once` / `run_repeating` 的注册
 
