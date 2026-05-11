@@ -68,3 +68,27 @@ def max_drawdown(series: list[tuple[str, float]]) -> dict:
         "peak_date": worst_peak_date,
         "trough_date": worst_trough_date,
     }
+
+
+def historical_var(returns: list[float], confidence: float = 0.95) -> float:
+    """Historical Value-at-Risk: the (1-confidence) quantile of returns.
+
+    Returned as a negative number (loss). Example: -0.04 = 4% one-day loss
+    at the chosen confidence level.
+    """
+    if len(returns) < 2:
+        return 0.0
+    sorted_returns = sorted(returns)
+    tail_idx = int(len(sorted_returns) * (1.0 - confidence))
+    tail_idx = min(tail_idx, len(sorted_returns) - 1)
+    return round(sorted_returns[tail_idx], 6)
+
+
+def historical_cvar(returns: list[float], confidence: float = 0.95) -> float:
+    """Conditional VaR (a.k.a. Expected Shortfall): average loss in the worst tail."""
+    if len(returns) < 2:
+        return 0.0
+    sorted_returns = sorted(returns)
+    tail_size = max(1, int(len(sorted_returns) * (1.0 - confidence)))
+    tail = sorted_returns[:tail_size]
+    return round(sum(tail) / len(tail), 6)

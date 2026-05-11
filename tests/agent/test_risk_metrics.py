@@ -49,3 +49,27 @@ def test_max_drawdown_empty_returns_zero():
     result = max_drawdown([])
     assert result["max_drawdown_pct"] == 0.0
     assert result["peak_date"] is None
+
+
+from agent.risk_metrics import historical_var, historical_cvar
+
+
+def test_historical_var_95_picks_5th_percentile_loss():
+    returns = [-0.10, -0.08, -0.05, -0.04, -0.03, -0.02, -0.01, 0.0,
+               0.01, 0.01, 0.02, 0.02, 0.03, 0.03, 0.04, 0.05,
+               0.05, 0.06, 0.07, 0.08]
+    var95 = historical_var(returns, confidence=0.95)
+    assert var95 == pytest.approx(-0.08, rel=1e-6)
+
+
+def test_historical_var_returns_zero_when_insufficient_data():
+    assert historical_var([], confidence=0.95) == 0.0
+    assert historical_var([0.01], confidence=0.95) == 0.0
+
+
+def test_historical_cvar_is_mean_of_tail():
+    returns = [-0.10, -0.08, -0.05, -0.04, -0.03, -0.02, -0.01, 0.0,
+               0.01, 0.01, 0.02, 0.02, 0.03, 0.03, 0.04, 0.05,
+               0.05, 0.06, 0.07, 0.08]
+    cvar95 = historical_cvar(returns, confidence=0.95)
+    assert cvar95 == pytest.approx(-0.10, rel=1e-6)
