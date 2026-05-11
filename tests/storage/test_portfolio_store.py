@@ -139,3 +139,36 @@ def test_get_net_liquidation_series_returns_ordered_pairs(tmp_path, monkeypatch)
         ("2026-05-02", 10500.0),
         ("2026-05-03", 10200.0),
     ]
+
+
+def test_get_net_liquidation_series_days_zero_returns_empty(tmp_path, monkeypatch):
+    monkeypatch.setenv("FINANCEBRO_DB_PATH", str(tmp_path / "test.db"))
+    from storage.portfolio_store import get_net_liquidation_series
+    assert get_net_liquidation_series(999, days=0) == []
+
+
+def test_get_net_liquidation_series_days_limits_result(tmp_path, monkeypatch):
+    monkeypatch.setenv("FINANCEBRO_DB_PATH", str(tmp_path / "test.db"))
+    from storage.portfolio_store import save_portfolio_report, get_net_liquidation_series
+
+    user_id = 888
+    for date, nlv in [("2026-05-01", 10000.0), ("2026-05-02", 10500.0), ("2026-05-03", 10200.0)]:
+        save_portfolio_report(user_id, {
+            "report_date": date,
+            "accounts": [{"account_id": "U1", "alias": "main", "base_currency": "USD",
+                "summary": {"net_liquidation": nlv, "stock_value_base": nlv * 0.9,
+                    "cash_base": nlv * 0.1, "total_unrealized_pnl_base": 0,
+                    "total_cost_base": nlv * 0.9, "total_unrealized_pnl_pct": 0},
+                "positions": [], "cash_balances": []}],
+        })
+
+    result = get_net_liquidation_series(user_id, days=2)
+    assert len(result) == 2
+    assert result[0] == ("2026-05-02", 10500.0)
+    assert result[1] == ("2026-05-03", 10200.0)
+
+
+def test_get_net_liquidation_series_empty_db_returns_empty(tmp_path, monkeypatch):
+    monkeypatch.setenv("FINANCEBRO_DB_PATH", str(tmp_path / "test.db"))
+    from storage.portfolio_store import get_net_liquidation_series
+    assert get_net_liquidation_series(999, days=30) == []

@@ -413,16 +413,21 @@ def get_net_liquidation_series(
     Sums across multiple accounts on the same date so the series represents the
     user's combined book.
     """
-    with db.transaction() as conn:
+    if days <= 0:
+        return []
+    conn = db.connect()
+    try:
         rows = conn.execute(
             """
             select report_date, sum(net_liquidation) as nlv
             from portfolio_snapshots
             where user_id = ?
             group by report_date
-            order by report_date asc
+            order by report_date desc
+            limit ?
             """,
-            (user_id,),
+            (user_id, days),
         ).fetchall()
-    pairs = [(r["report_date"], float(r["nlv"])) for r in rows]
-    return pairs[-days:]
+    finally:
+        conn.close()
+    return [(r["report_date"], float(r["nlv"])) for r in reversed(rows)]
