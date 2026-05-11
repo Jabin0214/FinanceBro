@@ -34,3 +34,37 @@ def annualized_volatility(returns: list[float]) -> float:
     mean = fmean(returns)
     var = sum((r - mean) ** 2 for r in returns) / (n - 1)
     return math.sqrt(var) * math.sqrt(TRADING_DAYS_PER_YEAR)
+
+
+def max_drawdown(series: list[tuple[str, float]]) -> dict:
+    """Largest peak-to-trough percentage decline in the NLV series.
+
+    Returns a negative percentage (e.g. -25.0 = 25% drawdown).
+    """
+    if not series:
+        return {"max_drawdown_pct": 0.0, "peak_date": None, "trough_date": None}
+
+    running_peak_value = series[0][1]
+    running_peak_date = series[0][0]
+    worst_dd = 0.0
+    worst_peak_date: str | None = None
+    worst_trough_date: str | None = None
+
+    for date, value in series:
+        if value > running_peak_value:
+            running_peak_value = value
+            running_peak_date = date
+            continue
+        if running_peak_value <= 0:
+            continue
+        dd = value / running_peak_value - 1.0
+        if dd < worst_dd:
+            worst_dd = dd
+            worst_peak_date = running_peak_date
+            worst_trough_date = date
+
+    return {
+        "max_drawdown_pct": round(worst_dd * 100, 4),
+        "peak_date": worst_peak_date,
+        "trough_date": worst_trough_date,
+    }
