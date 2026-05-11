@@ -108,6 +108,17 @@ def _init_schema(conn: sqlite3.Connection) -> None:
             ending_cash real not null default 0,
             ending_cash_base real not null default 0
         );
+
+        create table if not exists trigger_fires (
+            id integer primary key autoincrement,
+            trigger_name text not null,
+            user_id integer not null,
+            fingerprint text not null,
+            fired_at text not null default current_timestamp
+        );
+
+        create index if not exists idx_trigger_fires_lookup
+            on trigger_fires (trigger_name, user_id, fired_at desc);
         """
     )
     conn.commit()
