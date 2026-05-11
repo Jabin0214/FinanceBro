@@ -73,3 +73,30 @@ def test_historical_cvar_is_mean_of_tail():
                0.05, 0.06, 0.07, 0.08]
     cvar95 = historical_cvar(returns, confidence=0.95)
     assert cvar95 == pytest.approx(-0.10, rel=1e-6)
+
+
+from agent.risk_metrics import sharpe_ratio, sortino_ratio
+
+
+def test_sharpe_ratio_constant_positive_returns():
+    returns = [0.001] * 30
+    assert sharpe_ratio(returns) == 0.0  # zero variance returns zero
+
+
+def test_sharpe_ratio_basic_shape():
+    returns = [0.01, -0.005, 0.015, -0.002, 0.008]
+    sr = sharpe_ratio(returns, risk_free_annual=0.0)
+    assert sr > 0
+    assert math.isfinite(sr)
+
+
+def test_sortino_ratio_only_uses_downside():
+    returns = [0.02, 0.02, 0.02, -0.01, -0.01]
+    so = sortino_ratio(returns)
+    assert so > 0
+    assert math.isfinite(so)
+
+
+def test_sortino_ratio_no_downside_returns_zero():
+    returns = [0.01, 0.02, 0.03]
+    assert sortino_ratio(returns) == 0.0

@@ -92,3 +92,38 @@ def historical_cvar(returns: list[float], confidence: float = 0.95) -> float:
     tail_size = max(1, int(len(sorted_returns) * (1.0 - confidence)))
     tail = sorted_returns[:tail_size]
     return round(sum(tail) / len(tail), 6)
+
+
+def sharpe_ratio(returns: list[float], risk_free_annual: float = 0.0) -> float:
+    """Annualized Sharpe = (mean_daily - rf_daily) / std_daily * sqrt(252)."""
+    if len(returns) < 2:
+        return 0.0
+    rf_daily = risk_free_annual / TRADING_DAYS_PER_YEAR
+    excess = [r - rf_daily for r in returns]
+    mean = fmean(excess)
+    n = len(excess)
+    var = sum((r - mean) ** 2 for r in excess) / (n - 1)
+    std = math.sqrt(var)
+    if std == 0:
+        return 0.0
+    return round(mean / std * math.sqrt(TRADING_DAYS_PER_YEAR), 4)
+
+
+def sortino_ratio(returns: list[float], risk_free_annual: float = 0.0) -> float:
+    """Annualized Sortino = (mean - rf) / downside_std * sqrt(252).
+
+    downside_std uses only negative excess returns.
+    """
+    if len(returns) < 2:
+        return 0.0
+    rf_daily = risk_free_annual / TRADING_DAYS_PER_YEAR
+    excess = [r - rf_daily for r in returns]
+    downside = [r for r in excess if r < 0]
+    if not downside:
+        return 0.0
+    mean = fmean(excess)
+    dd_var = sum(r * r for r in downside) / len(downside)
+    dd_std = math.sqrt(dd_var)
+    if dd_std == 0:
+        return 0.0
+    return round(mean / dd_std * math.sqrt(TRADING_DAYS_PER_YEAR), 4)
