@@ -174,3 +174,50 @@ async def test_news_monitor_uses_persistent_dedup(monkeypatch):
         await proactive.news_monitor_job(context)
 
     assert bot_mock.send_message.await_count == 1
+
+
+@pytest.mark.anyio
+async def test_news_monitor_prepends_high_impact_summary(monkeypatch):
+    monkeypatch.setattr("bot.proactive.PROACTIVE_NEWS_USER_ID", 42)
+
+    report = {
+        "report_date": "2026-05-10",
+        "accounts": [{
+            "account_id": "U1", "alias": "main", "base_currency": "USD",
+            "summary": {"net_liquidation": 10000, "stock_value_base": 10000,
+                        "cash_base": 0, "total_unrealized_pnl_base": 0,
+                        "total_cost_base": 10000, "total_unrealized_pnl_pct": 0},
+            "positions": [
+                {"symbol": "AAPL", "description": "", "asset_category": "STK",
+                 "currency": "USD", "market_value_base": 8000,
+                 "unrealized_pnl_base": 0, "unrealized_pnl_pct": 0,
+                 "cost_basis_base": 8000},
+                {"symbol": "TSLA", "description": "", "asset_category": "STK",
+                 "currency": "USD", "market_value_base": 2000,
+                 "unrealized_pnl_base": 0, "unrealized_pnl_pct": 0,
+                 "cost_basis_base": 2000},
+            ],
+            "cash": [],
+        }],
+    }
+
+    grok_digest = (
+        "AAPL beats earnings and raises guidance for next quarter.\n"
+        "TSLA recall announced over battery defect.\n"
+        "Generic market chatter with no ticker."
+    )
+
+    bot_mock = AsyncMock()
+    context = type("Ctx", (), {"bot": bot_mock})()
+
+    from bot import proactive
+
+    with patch.object(proactive, "_fetch_and_save", return_value=report), \
+         patch.object(proactive, "_get_news", return_value=grok_digest):
+        await proactive.news_monitor_job(context)
+
+    sent_text = bot_mock.send_message.await_args.kwargs["text"]
+    assert "影响排序" in sent_text
+    aapl_idx = sent_text.find("AAPL")
+    tsla_idx = sent_text.find("TSLA")
+    assert 0 <= aapl_idx < tsla_idx

@@ -8,6 +8,7 @@ import logging
 
 from telegram.constants import ParseMode
 
+from agent.news_impact import rank_news_by_impact
 from agent.risk_calculator import compute_metrics
 from agent.tools.news import _get_news
 from config import (
@@ -98,6 +99,18 @@ async def news_monitor_job(context) -> None:
 
         query = " ".join(symbols) + " major news earnings next earnings date market moving"
         digest = await asyncio.to_thread(_get_news, query)
+        weights = _position_weights(report)
+        impact_summary = ""
+        if weights:
+            lines = [line.strip() for line in digest.splitlines() if line.strip()]
+            ranked = rank_news_by_impact(lines, weights=weights)
+            top = [r for r in ranked if r["impact"] != 0][:3]
+            if top:
+                impact_summary = "<b>影响排序（前 3 条）</b>\n" + "\n".join(
+                    f"{'🟢' if r['impact'] > 0 else '🔴'} {', '.join(r['symbols']) or '—'}"
+                    f"（影响分 {r['impact']:.1f}）：{r['headline']}"
+                    for r in top
+                ) + "\n\n"
         key = _fingerprint(user_id, report.get("report_date", ""), digest[:500])
         if not should_fire(_NEWS_MONITOR_TRIGGER, user_id=user_id, fingerprint=key):
             logger.info("news monitor skipped: trigger dedup")
@@ -106,7 +119,7 @@ async def news_monitor_job(context) -> None:
         await _send(
             context,
             user_id,
-            "<b>重大新闻 / 财报提醒</b>\n\n" + digest,
+            "<b>重大新闻 / 财报提醒</b>\n\n" + impact_summary + digest,
         )
         record_fire(_NEWS_MONITOR_TRIGGER, user_id=user_id, fingerprint=key)
     except Exception:
@@ -182,6 +195,14 @@ async def _send(context, user_id: int, text: str) -> None:
         await context.bot.send_message(chat_id=user_id, text=text, parse_mode=ParseMode.HTML)
     except Exception:
         logger.info("proactive notification failed for user %s", user_id, exc_info=True)
+
+
+def _position_weights(report: dict) -> dict[str, float]:
+    """Return {symbol: weight_pct} from compute_metrics output."""
+    metrics = compute_metrics(report)
+    if "error" in metrics:
+        return {}
+    return {item["symbol"]: item["weight_pct"] for item in metrics.get("concentration", [])}
 
 
 def _top_symbols(report: dict, limit: int) -> list[str]:
