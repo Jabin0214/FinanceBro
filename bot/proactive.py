@@ -17,13 +17,23 @@ from config import (
     PROACTIVE_BRIEF_USER_ID,
     PROACTIVE_NEWS_USER_ID,
 )
+from bot.triggers import Trigger, record_fire, should_fire
 from ibkr.flex_query import fetch_flex_report
 from storage.portfolio_store import save_portfolio_report
 
 logger = logging.getLogger(__name__)
 
-_sent_alert_keys: set[str] = set()
-_sent_news_keys: set[str] = set()
+_THRESHOLD_ALERT_TRIGGER = Trigger(
+    name="alert.threshold",
+    cooldown_seconds=12 * 3600,
+    max_fires_per_day=3,
+)
+
+_NEWS_MONITOR_TRIGGER = Trigger(
+    name="news.monitor",
+    cooldown_seconds=4 * 3600,
+    max_fires_per_day=4,
+)
 
 
 async def opening_brief_job(context) -> None:
@@ -58,16 +68,16 @@ async def threshold_alert_job(context) -> None:
             return
 
         key = _fingerprint(user_id, report.get("report_date", ""), "\n".join(alerts))
-        if key in _sent_alert_keys:
-            logger.info("threshold alert skipped: duplicate alert key")
+        if not should_fire(_THRESHOLD_ALERT_TRIGGER, user_id=user_id, fingerprint=key):
+            logger.info("threshold alert skipped: trigger dedup")
             return
-        _sent_alert_keys.add(key)
 
         await _send(
             context,
             user_id,
             "<b>持仓阈值预警</b>\n\n" + "\n".join(f"🔴 {alert}" for alert in alerts),
         )
+        record_fire(_THRESHOLD_ALERT_TRIGGER, user_id=user_id, fingerprint=key)
     except Exception:
         logger.exception("threshold alert failed")
         await _send(context, user_id, "❌ 持仓阈值预警检查失败，请稍后手动发送 /report 检查。")
@@ -89,16 +99,16 @@ async def news_monitor_job(context) -> None:
         query = " ".join(symbols) + " major news earnings next earnings date market moving"
         digest = await asyncio.to_thread(_get_news, query)
         key = _fingerprint(user_id, report.get("report_date", ""), digest[:500])
-        if key in _sent_news_keys:
-            logger.info("news monitor skipped: duplicate digest")
+        if not should_fire(_NEWS_MONITOR_TRIGGER, user_id=user_id, fingerprint=key):
+            logger.info("news monitor skipped: trigger dedup")
             return
-        _sent_news_keys.add(key)
 
         await _send(
             context,
             user_id,
             "<b>重大新闻 / 财报提醒</b>\n\n" + digest,
         )
+        record_fire(_NEWS_MONITOR_TRIGGER, user_id=user_id, fingerprint=key)
     except Exception:
         logger.exception("news monitor failed")
         await _send(context, user_id, "❌ 新闻与财报提醒检查失败。")

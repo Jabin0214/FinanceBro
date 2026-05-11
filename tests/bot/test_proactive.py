@@ -97,3 +97,80 @@ async def test_opening_brief_job_fetches_saves_and_sends(monkeypatch):
 @pytest.fixture
 def anyio_backend():
     return "asyncio"
+
+
+from unittest.mock import AsyncMock, patch
+
+
+@pytest.fixture(autouse=True)
+def fresh_db(tmp_path, monkeypatch):
+    monkeypatch.setenv("FINANCEBRO_DB_PATH", str(tmp_path / "test.db"))
+
+
+@pytest.mark.anyio
+async def test_threshold_alert_uses_persistent_dedup(monkeypatch):
+    """Two calls in the same session must only send once."""
+    monkeypatch.setattr("bot.proactive.PROACTIVE_ALERT_USER_ID", 42)
+
+    report = {
+        "report_date": "2026-05-10",
+        "accounts": [{
+            "account_id": "U1", "alias": "main", "base_currency": "USD",
+            "summary": {"net_liquidation": 10000, "stock_value_base": 9000,
+                        "cash_base": 1000, "total_unrealized_pnl_base": -1000,
+                        "total_cost_base": 10000, "total_unrealized_pnl_pct": -10.0},
+            "positions": [{
+                "symbol": "AAA", "description": "", "asset_category": "STK",
+                "currency": "USD", "market_value_base": 9000,
+                "unrealized_pnl_base": -1000, "unrealized_pnl_pct": -10.0,
+                "cost_basis_base": 10000,
+            }],
+            "cash_balances": [],
+        }],
+    }
+
+    bot_mock = AsyncMock()
+    context = type("Ctx", (), {"bot": bot_mock})()
+
+    from bot import proactive
+
+    with patch.object(proactive, "_fetch_and_save", return_value=report):
+        await proactive.threshold_alert_job(context)
+        await proactive.threshold_alert_job(context)
+
+    assert bot_mock.send_message.await_count == 1
+
+
+@pytest.mark.anyio
+async def test_news_monitor_uses_persistent_dedup(monkeypatch):
+    """Two calls with same digest must only send once."""
+    monkeypatch.setattr("bot.proactive.PROACTIVE_NEWS_USER_ID", 42)
+
+    report = {
+        "report_date": "2026-05-10",
+        "accounts": [{
+            "account_id": "U1", "alias": "main", "base_currency": "USD",
+            "summary": {"net_liquidation": 10000, "stock_value_base": 10000,
+                        "cash_base": 0, "total_unrealized_pnl_base": 0,
+                        "total_cost_base": 10000, "total_unrealized_pnl_pct": 0},
+            "positions": [
+                {"symbol": "AAA", "description": "", "asset_category": "STK",
+                 "currency": "USD", "market_value_base": 10000,
+                 "unrealized_pnl_base": 0, "unrealized_pnl_pct": 0,
+                 "cost_basis_base": 10000},
+            ],
+            "cash_balances": [],
+        }],
+    }
+
+    bot_mock = AsyncMock()
+    context = type("Ctx", (), {"bot": bot_mock})()
+
+    from bot import proactive
+
+    with patch.object(proactive, "_fetch_and_save", return_value=report), \
+         patch.object(proactive, "_get_news", return_value="AAA reports strong Q1"):
+        await proactive.news_monitor_job(context)
+        await proactive.news_monitor_job(context)
+
+    assert bot_mock.send_message.await_count == 1
