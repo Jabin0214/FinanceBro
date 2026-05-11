@@ -142,11 +142,12 @@ agent/orchestrator.py
   - history trim
   - token / cost 统计
   |
-  +--> agent/tools/portfolio.py  -> IBKR Flex Query
-  +--> agent/tools/history.py    -> SQLite 历史快照聚合
-  +--> agent/tools/report.py     -> HTML 报告
-  +--> agent/tools/news.py       -> Grok web_search + x_search
-  +--> agent/tools/risk.py       -> risk_calculator + Grok Risk Analyst
+  +--> agent/tools/portfolio.py     -> IBKR Flex Query
+  +--> agent/tools/history.py       -> SQLite 历史快照聚合
+  +--> agent/tools/report.py        -> HTML 报告
+  +--> agent/tools/news.py          -> Grok web_search + x_search
+  +--> agent/tools/risk.py          -> risk_calculator + Grok Risk Analyst
+  +--> agent/tools/risk_metrics.py  -> 历史风险指标（波动率 / 回撤 / VaR / Sharpe）
 ```
 
 后台任务：
@@ -189,7 +190,8 @@ storage/portfolio_store.py
 | 风险分析 | `grok-4-1-fast-reasoning` | 结合风险指标和实时搜索 |
 | 历史复盘 | Python + Claude | SQLite 聚合历史快照，Claude 负责解释 |
 | 报表渲染 | Python | 确定性 HTML 输出 |
-| 风险指标 | Python | HHI、集中度、币种敞口、盈亏分布 |
+| 风险指标（实时） | Python | HHI、集中度、币种敞口、盈亏分布 |
+| 历史风险指标 | Python | 波动率、最大回撤、VaR/CVaR、Sharpe、Sortino，基于快照序列 |
 | 数据持久化 | SQLite | 本地文件，Docker volume 持久化 |
 
 ---
