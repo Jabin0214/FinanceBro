@@ -101,3 +101,41 @@ def test_save_portfolio_report_rejects_empty_accounts(tmp_path, monkeypatch):
 
     with pytest.raises(ValueError, match="accounts"):
         save_portfolio_report(42, {"report_date": "2026-04-28", "accounts": []})
+
+
+def test_get_net_liquidation_series_returns_ordered_pairs(tmp_path, monkeypatch):
+    monkeypatch.setenv("FINANCEBRO_DB_PATH", str(tmp_path / "test.db"))
+
+    from storage.portfolio_store import (
+        save_portfolio_report,
+        get_net_liquidation_series,
+    )
+
+    user_id = 999
+    base_report = {
+        "report_date": "2026-05-01",
+        "accounts": [{
+            "account_id": "U1",
+            "alias": "main",
+            "base_currency": "USD",
+            "summary": {"net_liquidation": 10000.0, "stock_value_base": 8000.0,
+                        "cash_base": 2000.0, "total_unrealized_pnl_base": 0,
+                        "total_cost_base": 8000.0, "total_unrealized_pnl_pct": 0},
+            "positions": [],
+            "cash_balances": [],
+        }],
+    }
+    save_portfolio_report(user_id, base_report)
+    save_portfolio_report(user_id, {**base_report, "report_date": "2026-05-02",
+        "accounts": [{**base_report["accounts"][0],
+            "summary": {**base_report["accounts"][0]["summary"], "net_liquidation": 10500.0}}]})
+    save_portfolio_report(user_id, {**base_report, "report_date": "2026-05-03",
+        "accounts": [{**base_report["accounts"][0],
+            "summary": {**base_report["accounts"][0]["summary"], "net_liquidation": 10200.0}}]})
+
+    series = get_net_liquidation_series(user_id, days=30)
+    assert series == [
+        ("2026-05-01", 10000.0),
+        ("2026-05-02", 10500.0),
+        ("2026-05-03", 10200.0),
+    ]

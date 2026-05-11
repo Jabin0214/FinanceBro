@@ -402,3 +402,27 @@ def _replace_cash(conn, snapshot_id: int, cash_balances: list[dict]) -> None:
             for cash in cash_balances
         ],
     )
+
+
+def get_net_liquidation_series(
+    user_id: int,
+    days: int = 90,
+) -> list[tuple[str, float]]:
+    """Return [(report_date, summed_net_liquidation)] ascending, last `days` only.
+
+    Sums across multiple accounts on the same date so the series represents the
+    user's combined book.
+    """
+    with db.transaction() as conn:
+        rows = conn.execute(
+            """
+            select report_date, sum(net_liquidation) as nlv
+            from portfolio_snapshots
+            where user_id = ?
+            group by report_date
+            order by report_date asc
+            """,
+            (user_id,),
+        ).fetchall()
+    pairs = [(r["report_date"], float(r["nlv"])) for r in rows]
+    return pairs[-days:]
