@@ -127,3 +127,37 @@ def sortino_ratio(returns: list[float], risk_free_annual: float = 0.0) -> float:
     if dd_std == 0:
         return 0.0
     return round(mean / dd_std * math.sqrt(TRADING_DAYS_PER_YEAR), 4)
+
+
+def compute_history_metrics(
+    series: list[tuple[str, float]],
+    risk_free_annual: float = 0.0,
+    confidence: float = 0.95,
+) -> dict:
+    """One-shot aggregator returning every historical risk metric.
+
+    Input: ascending [(date, nlv)] pairs (the shape returned by
+    storage.portfolio_store.get_net_liquidation_series).
+    """
+    if len(series) < 2:
+        return {"error": "需要至少 2 个快照才能计算历史风险指标"}
+
+    returns = daily_returns(series)
+    if len(returns) < 2:
+        return {"error": "有效收益样本不足"}
+
+    return {
+        "sample_size": len(series),
+        "window_days": len(returns),
+        "start_date": series[0][0],
+        "end_date": series[-1][0],
+        "start_nlv": round(series[0][1], 2),
+        "end_nlv": round(series[-1][1], 2),
+        "total_return_pct": round((series[-1][1] / series[0][1] - 1.0) * 100, 2),
+        "annualized_volatility": round(annualized_volatility(returns), 4),
+        "max_drawdown": max_drawdown(series),
+        "var_95": historical_var(returns, confidence=confidence),
+        "cvar_95": historical_cvar(returns, confidence=confidence),
+        "sharpe": sharpe_ratio(returns, risk_free_annual=risk_free_annual),
+        "sortino": sortino_ratio(returns, risk_free_annual=risk_free_annual),
+    }

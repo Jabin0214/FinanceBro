@@ -100,3 +100,33 @@ def test_sortino_ratio_only_uses_downside():
 def test_sortino_ratio_no_downside_returns_zero():
     returns = [0.01, 0.02, 0.03]
     assert sortino_ratio(returns) == 0.0
+
+
+from agent.risk_metrics import compute_history_metrics
+
+
+def test_compute_history_metrics_returns_full_payload():
+    series = [
+        ("2026-04-01", 10000.0),
+        ("2026-04-02", 10100.0),
+        ("2026-04-03",  9900.0),
+        ("2026-04-04", 10050.0),
+        ("2026-04-05",  9800.0),
+        ("2026-04-06",  9950.0),
+    ]
+    out = compute_history_metrics(series)
+    assert out["sample_size"] == 6
+    assert out["window_days"] == 5
+    assert "annualized_volatility" in out
+    assert "max_drawdown" in out
+    assert "var_95" in out
+    assert "cvar_95" in out
+    assert "sharpe" in out
+    assert "sortino" in out
+    assert out["start_date"] == "2026-04-01"
+    assert out["end_date"] == "2026-04-06"
+
+
+def test_compute_history_metrics_too_short_returns_error():
+    out = compute_history_metrics([("2026-04-01", 10000.0)])
+    assert "error" in out
