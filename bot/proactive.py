@@ -20,7 +20,7 @@ from config import (
 )
 from bot.triggers import Trigger, record_fire, should_fire
 from ibkr.flex_query import fetch_flex_report
-from storage.portfolio_store import save_portfolio_report
+from storage.portfolio_store import get_net_liquidation_series, save_portfolio_report
 
 logger = logging.getLogger(__name__)
 
@@ -45,7 +45,8 @@ async def opening_brief_job(context) -> None:
 
     try:
         report = await asyncio.to_thread(_fetch_and_save, user_id)
-        await _send(context, user_id, build_opening_brief(report))
+        nlv_series = await asyncio.to_thread(get_net_liquidation_series, user_id, 2)
+        await _send(context, user_id, build_opening_brief(report, nlv_series=nlv_series))
     except Exception:
         logger.exception("opening brief failed")
         await _send(context, user_id, "❌ 开盘前简报生成失败，请稍后手动发送 /report 检查。")
@@ -127,13 +128,32 @@ async def news_monitor_job(context) -> None:
         await _send(context, user_id, "❌ 新闻与财报提醒检查失败。")
 
 
-def build_opening_brief(report: dict) -> str:
+def build_opening_brief(
+    report: dict,
+    nlv_series: list[tuple[str, float]] | None = None,
+) -> str:
     metrics = compute_metrics(report)
     if "error" in metrics:
         return f"<b>开盘前简报</b>\n\n⚪ 暂无有效持仓数据：{metrics['error']}"
 
     pnl = metrics["pnl_summary"]
     pnl_emoji = "🟢" if pnl["total_pnl_pct"] >= 0 else "🔴"
+
+    # NLV trend vs yesterday
+    nlv_trend = ""
+    if nlv_series and len(nlv_series) >= 2:
+        prev_nlv = nlv_series[-2][1]
+        curr_nlv = nlv_series[-1][1]
+        if prev_nlv:
+            delta = curr_nlv - prev_nlv
+            delta_pct = delta / prev_nlv * 100
+            trend_emoji = "📈" if delta >= 0 else "📉"
+            sign = "+" if delta >= 0 else ""
+            nlv_trend = (
+                f"{trend_emoji} 净值变动：{sign}{delta:,.2f}"
+                f"（{delta_pct:+.1f}%）vs 昨日\n"
+            )
+
     top = metrics["concentration"][:5]
     top_lines = [
         f"{item['symbol']} {item['weight_pct']:.1f}%（浮动 {item['unrealized_pnl_pct']:.1f}%）"
@@ -150,6 +170,7 @@ def build_opening_brief(report: dict) -> str:
         "<b>开盘前简报</b>\n\n"
         f"日期：{report.get('report_date', 'unknown')}\n"
         f"净值：${metrics['total_net_liquidation']:,.2f}\n"
+        f"{nlv_trend}"
         f"{pnl_emoji} 整体浮动：{pnl['total_pnl_pct']:.1f}%"
         f"（${pnl['total_unrealized_pnl']:,.2f}）\n"
         f"前五大持仓：{metrics['top5_concentration_pct']:.1f}% · HHI：{metrics['hhi']:,.0f}\n\n"

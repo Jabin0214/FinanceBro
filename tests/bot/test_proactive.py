@@ -47,6 +47,96 @@ def _report():
     }
 
 
+def test_build_opening_brief_includes_nlv_trend_when_series_has_two_entries():
+    from bot.proactive import build_opening_brief
+
+    report = {
+        "report_date": "2026-05-12",
+        "accounts": [{
+            "account_id": "U1",
+            "alias": "main",
+            "base_currency": "USD",
+            "summary": {
+                "net_liquidation": 105000.0,
+                "stock_value_base": 100000.0,
+                "cash_base": 5000.0,
+                "total_unrealized_pnl_base": 5000.0,
+                "total_cost_base": 95000.0,
+                "total_unrealized_pnl_pct": 5.26,
+            },
+            "positions": [{
+                "symbol": "AAPL",
+                "description": "Apple Inc",
+                "currency": "USD",
+                "asset_category": "STK",
+                "quantity": 10.0,
+                "cost_price": 150.0,
+                "mark_price": 175.0,
+                "market_value": 1750.0,
+                "market_value_base": 1750.0,
+                "cost_basis": 1500.0,
+                "cost_basis_base": 1500.0,
+                "unrealized_pnl": 250.0,
+                "unrealized_pnl_base": 250.0,
+                "unrealized_pnl_pct": 16.67,
+                "fx_rate": 1.0,
+            }],
+            "cash_balances": [],
+        }],
+    }
+    nlv_series = [("2026-05-11", 100000.0), ("2026-05-12", 105000.0)]
+
+    text = build_opening_brief(report, nlv_series=nlv_series)
+
+    assert "净值变动" in text
+    assert "+5,000" in text or "+5000" in text
+    assert "+5.0%" in text
+
+
+def test_build_opening_brief_omits_trend_when_series_has_one_entry():
+    from bot.proactive import build_opening_brief
+
+    report = {
+        "report_date": "2026-05-12",
+        "accounts": [{
+            "account_id": "U1",
+            "alias": "main",
+            "base_currency": "USD",
+            "summary": {
+                "net_liquidation": 100000.0,
+                "stock_value_base": 95000.0,
+                "cash_base": 5000.0,
+                "total_unrealized_pnl_base": 0.0,
+                "total_cost_base": 95000.0,
+                "total_unrealized_pnl_pct": 0.0,
+            },
+            "positions": [{
+                "symbol": "AAPL",
+                "description": "Apple Inc",
+                "currency": "USD",
+                "asset_category": "STK",
+                "quantity": 10.0,
+                "cost_price": 150.0,
+                "mark_price": 150.0,
+                "market_value": 1500.0,
+                "market_value_base": 1500.0,
+                "cost_basis": 1500.0,
+                "cost_basis_base": 1500.0,
+                "unrealized_pnl": 0.0,
+                "unrealized_pnl_base": 0.0,
+                "unrealized_pnl_pct": 0.0,
+                "fx_rate": 1.0,
+            }],
+            "cash_balances": [],
+        }],
+    }
+    nlv_series = [("2026-05-12", 100000.0)]  # only one entry
+
+    text = build_opening_brief(report, nlv_series=nlv_series)
+
+    assert "净值变动" not in text
+
+
 def test_build_opening_brief_includes_core_metrics():
     text = proactive.build_opening_brief(_report())
 
