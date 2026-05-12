@@ -119,6 +119,15 @@ def _init_schema(conn: sqlite3.Connection) -> None:
 
         create index if not exists idx_trigger_fires_lookup
             on trigger_fires (trigger_name, user_id, fired_at desc);
+
+        create table if not exists target_allocations (
+            id integer primary key autoincrement,
+            user_id integer not null,
+            symbol text not null,
+            target_pct real not null,
+            updated_at text not null default current_timestamp,
+            unique (user_id, symbol)
+        );
         """
     )
     conn.commit()
