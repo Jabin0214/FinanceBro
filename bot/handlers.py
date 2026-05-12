@@ -20,6 +20,7 @@ from bot.auth import is_allowed, is_private_chat
 from bot.messaging import send_html_with_fallback, typing_indicator
 from ibkr.flex_query import fetch_flex_report
 from report.html_report import build_html_file
+from storage.allocation_store import get_targets, set_targets
 from storage.portfolio_store import get_portfolio_history_summary, save_portfolio_report
 
 logger = logging.getLogger(__name__)
@@ -47,15 +48,17 @@ async def cmd_start(update: Update, _context: ContextTypes.DEFAULT_TYPE) -> None
 
     await update.message.reply_text(
         "👋 <b>FinanceBro</b> 已就绪\n\n"
-        "💬 <b>直接发消息</b>即可与 AI 对话，可询问持仓、盈亏分析等\n\n"
+        "💬 <b>直接发消息</b>即可与 AI 对话，可询问持仓、盈亏分析、调仓建议等\n\n"
         "📋 <b>命令</b>\n"
-        "/report — 直接获取持仓 HTML 报告\n"
-        "/risk   — 立即运行风险分析 Agent\n"
-        "/news AAPL — 搜索新闻 / 财报 / 市场动态\n"
-        "/brief  — 立即生成开盘前简报\n"
-        "/alerts — 立即检查持仓阈值预警\n"
-        "/history — 查看最近 30 天组合复盘\n"
-        "/clear  — 清除对话历史",
+        "/report      — 直接获取持仓 HTML 报告\n"
+        "/risk        — 立即运行风险分析 Agent\n"
+        "/news AAPL   — 搜索新闻 / 财报 / 市场动态\n"
+        "/brief       — 立即生成开盘前简报\n"
+        "/alerts      — 立即检查持仓阈值预警\n"
+        "/history     — 查看最近 30 天组合复盘\n"
+        "/settarget   — 设置目标仓位（例：/settarget AAPL 30 MSFT 20）\n"
+        "/target      — 查看目标仓位与调仓建议\n"
+        "/clear       — 清除对话历史",
         parse_mode=ParseMode.HTML,
     )
 
@@ -294,6 +297,73 @@ def _format_pnl_contributors(contributors: list[dict]) -> list[str]:
         pnl = float(item.get("unrealized_pnl_base") or 0)
         lines.append(f"{symbol}：{pnl:+,.2f}")
     return lines
+
+
+async def cmd_settarget(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if not _is_authorized_private(update):
+        await update.message.reply_text(_DENIED)
+        return
+
+    args = context.args or []
+    if len(args) < 2 or len(args) % 2 != 0:
+        await update.message.reply_text(
+            "用法：/settarget AAPL 30 MSFT 20 TSLA 15\n"
+            "每个标的需对应一个目标权重（%），成对输入。"
+        )
+        return
+
+    targets: dict[str, float] = {}
+    for i in range(0, len(args), 2):
+        symbol = args[i].upper()
+        try:
+            pct = float(args[i + 1])
+        except ValueError:
+            await update.message.reply_text(f"无效权重：{args[i + 1]}，请输入数字。")
+            return
+        if pct <= 0:
+            await update.message.reply_text(f"权重必须大于 0，{symbol} 的权重为 {pct}。")
+            return
+        targets[symbol] = pct
+
+    total = sum(targets.values())
+    warning = f"\n\n⚠️ 目标权重合计 {total:.1f}%，超过 100%，请确认。" if total > 100 else ""
+
+    user_id = update.effective_user.id
+    set_targets(user_id, targets)
+
+    lines = "\n".join(f"  {sym}：{pct:.1f}%" for sym, pct in sorted(targets.items()))
+    await update.message.reply_text(
+        f"✅ 目标仓位已保存\n\n{lines}\n\n合计：{total:.1f}%{warning}",
+        parse_mode=ParseMode.HTML,
+    )
+
+
+async def cmd_target(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if not _is_authorized_private(update):
+        await update.message.reply_text(_DENIED)
+        return
+
+    user_id = update.effective_user.id
+    targets = get_targets(user_id)
+
+    if not targets:
+        await update.message.reply_text(
+            "还未设置目标仓位，请使用：\n/settarget AAPL 30 MSFT 20 TSLA 15"
+        )
+        return
+
+    total = sum(targets.values())
+    lines = "\n".join(
+        f"<code>{sym:<8}</code>{pct:.1f}%" for sym, pct in sorted(targets.items())
+    )
+    await send_html_with_fallback(
+        update,
+        "<b>目标仓位</b>\n\n"
+        + lines
+        + f"\n{'—' * 14}\n"
+        + f"已分配：{total:.1f}%  剩余：{100.0 - total:.1f}%\n\n"
+        + "💬 发消息询问 AI 可获取调仓建议（偏离分析、建议买卖金额）。",
+    )
 
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:

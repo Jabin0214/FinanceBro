@@ -150,3 +150,47 @@ async def test_cmd_history_sends_portfolio_recap(monkeypatch):
     assert "现金：$1,500.00 -> $900.00" in sent[0]
     assert "AAPL 加仓 3.00 股" in sent[0]
     assert "TSLA 清仓 1.00 股" in sent[0]
+
+
+@pytest.mark.anyio
+async def test_cmd_settarget_stores_targets(monkeypatch):
+    stored = {}
+    monkeypatch.setattr(handlers, "is_allowed", lambda _user_id: True)
+    monkeypatch.setattr(handlers, "set_targets", lambda user_id, targets: stored.update(targets))
+    update = _update(user_id=42)
+    context = _context(args=["AAPL", "30", "MSFT", "20"])
+
+    await handlers.cmd_settarget(update, context)
+
+    assert stored == {"AAPL": 30.0, "MSFT": 20.0}
+    update.message.reply_text.assert_awaited_once()
+    assert "✅" in update.message.reply_text.await_args.args[0]
+
+
+@pytest.mark.anyio
+async def test_cmd_settarget_rejects_odd_args(monkeypatch):
+    monkeypatch.setattr(handlers, "is_allowed", lambda _user_id: True)
+    update = _update()
+    context = _context(args=["AAPL"])
+
+    await handlers.cmd_settarget(update, context)
+
+    assert "/settarget" in update.message.reply_text.await_args.args[0]
+
+
+@pytest.mark.anyio
+async def test_cmd_target_shows_stored_targets(monkeypatch):
+    sent = []
+    monkeypatch.setattr(handlers, "is_allowed", lambda _user_id: True)
+    monkeypatch.setattr(handlers, "get_targets", lambda _user_id: {"AAPL": 30.0, "MSFT": 20.0})
+    monkeypatch.setattr(
+        handlers,
+        "send_html_with_fallback",
+        AsyncMock(side_effect=lambda _message, text: sent.append(text)),
+    )
+
+    await handlers.cmd_target(_update(user_id=42), _context())
+
+    assert sent
+    assert "AAPL" in sent[0]
+    assert "30.0%" in sent[0]

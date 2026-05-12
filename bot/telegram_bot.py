@@ -1,17 +1,19 @@
 """Telegram application wiring.
 
 Commands:
-  /start   — show help
-  /report  — fetch IBKR portfolio HTML report (no AI, saves tokens)
-  /risk    — run risk analysis
-  /news    — search market news
-  /brief   — generate opening brief now
-  /alerts  — check threshold alerts now
-  /history — summarize recent portfolio changes
-  /clear   — clear current conversation history
+  /start      — show help
+  /report     — fetch IBKR portfolio HTML report (no AI, saves tokens)
+  /risk       — run risk analysis
+  /news       — search market news
+  /brief      — generate opening brief now
+  /alerts     — check threshold alerts now
+  /history    — summarize recent portfolio changes
+  /settarget  — set target allocation (e.g. /settarget AAPL 30 MSFT 20)
+  /target     — view stored target allocation
+  /clear      — clear current conversation history
 
 Plain text → routed to the Orchestrator agent (Claude Sonnet); the agent
-auto-invokes tools (portfolio, news, risk, report) as needed.
+auto-invokes tools (portfolio, news, risk, report, rebalancing) as needed.
 """
 
 from telegram.ext import Application, CommandHandler, MessageHandler, filters
@@ -24,7 +26,9 @@ from bot.handlers import (
     cmd_news,
     cmd_report,
     cmd_risk,
+    cmd_settarget,
     cmd_start,
+    cmd_target,
     handle_message,
 )
 from bot.scheduler import setup_jobs
@@ -40,6 +44,8 @@ def build_app() -> Application:
     app.add_handler(CommandHandler("brief", cmd_brief))
     app.add_handler(CommandHandler("alerts", cmd_alerts))
     app.add_handler(CommandHandler("history", cmd_history))
+    app.add_handler(CommandHandler("settarget", cmd_settarget))
+    app.add_handler(CommandHandler("target", cmd_target))
     app.add_handler(CommandHandler("clear", cmd_clear))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
     setup_jobs(app)
