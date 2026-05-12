@@ -311,3 +311,94 @@ async def test_news_monitor_prepends_high_impact_summary(monkeypatch):
     aapl_idx = sent_text.find("AAPL")
     tsla_idx = sent_text.find("TSLA")
     assert 0 <= aapl_idx < tsla_idx
+
+
+@pytest.mark.anyio
+async def test_drift_alert_job_fires_when_drift_exceeds_threshold(monkeypatch, tmp_path):
+    monkeypatch.setenv("FINANCEBRO_DB_PATH", str(tmp_path / "drift_test.db"))
+    from bot import proactive
+
+    sent = []
+
+    _report = {
+        "report_date": "2026-05-12",
+        "accounts": [{
+            "account_id": "U1", "alias": "main", "base_currency": "USD",
+            "summary": {"net_liquidation": 100000.0, "stock_value_base": 100000.0,
+                        "cash_base": 0.0, "total_unrealized_pnl_base": 0.0,
+                        "total_cost_base": 100000.0, "total_unrealized_pnl_pct": 0.0},
+            "positions": [{"symbol": "AAPL", "description": "", "currency": "USD",
+                           "asset_category": "STK", "quantity": 100.0, "cost_price": 150.0,
+                           "mark_price": 170.0, "market_value": 17000.0, "market_value_base": 17000.0,
+                           "cost_basis": 15000.0, "cost_basis_base": 15000.0, "unrealized_pnl": 2000.0,
+                           "unrealized_pnl_base": 2000.0, "unrealized_pnl_pct": 13.33, "fx_rate": 1.0}],
+            "cash_balances": [],
+        }],
+    }
+
+    monkeypatch.setattr(proactive, "DRIFT_ALERT_USER_ID", 42)
+    monkeypatch.setattr(proactive, "DRIFT_ALERT_THRESHOLD_PCT", 5.0)
+    monkeypatch.setattr(proactive, "get_latest_portfolio_report", lambda user_id: _report)
+    monkeypatch.setattr(proactive, "get_targets", lambda user_id: {"AAPL": 80.0})
+    monkeypatch.setattr(proactive, "should_fire", lambda trigger, user_id, fingerprint: True)
+    monkeypatch.setattr(proactive, "record_fire", lambda trigger, user_id, fingerprint: None)
+    monkeypatch.setattr(proactive, "_send", AsyncMock(side_effect=lambda ctx, uid, text: sent.append(text)))
+
+    context = SimpleNamespace(bot=AsyncMock())
+    await proactive.drift_alert_job(context)
+
+    assert sent
+    assert "仓位偏离预警" in sent[0]
+    assert "AAPL" in sent[0]
+
+
+@pytest.mark.anyio
+async def test_drift_alert_job_skips_when_drift_below_threshold(monkeypatch, tmp_path):
+    monkeypatch.setenv("FINANCEBRO_DB_PATH", str(tmp_path / "drift_test2.db"))
+    from bot import proactive
+
+    sent = []
+
+    _report = {
+        "report_date": "2026-05-12",
+        "accounts": [{
+            "account_id": "U1", "alias": "main", "base_currency": "USD",
+            "summary": {"net_liquidation": 100000.0, "stock_value_base": 100000.0,
+                        "cash_base": 0.0, "total_unrealized_pnl_base": 0.0,
+                        "total_cost_base": 100000.0, "total_unrealized_pnl_pct": 0.0},
+            "positions": [{"symbol": "AAPL", "description": "", "currency": "USD",
+                           "asset_category": "STK", "quantity": 100.0, "cost_price": 150.0,
+                           "mark_price": 150.0, "market_value": 15000.0, "market_value_base": 15000.0,
+                           "cost_basis": 15000.0, "cost_basis_base": 15000.0, "unrealized_pnl": 0.0,
+                           "unrealized_pnl_base": 0.0, "unrealized_pnl_pct": 0.0, "fx_rate": 1.0}],
+            "cash_balances": [],
+        }],
+    }
+
+    monkeypatch.setattr(proactive, "DRIFT_ALERT_USER_ID", 42)
+    monkeypatch.setattr(proactive, "DRIFT_ALERT_THRESHOLD_PCT", 20.0)
+    monkeypatch.setattr(proactive, "get_latest_portfolio_report", lambda user_id: _report)
+    monkeypatch.setattr(proactive, "get_targets", lambda user_id: {"AAPL": 14.0})
+    monkeypatch.setattr(proactive, "_send", AsyncMock(side_effect=lambda ctx, uid, text: sent.append(text)))
+
+    context = SimpleNamespace(bot=AsyncMock())
+    await proactive.drift_alert_job(context)
+
+    assert not sent
+
+
+@pytest.mark.anyio
+async def test_drift_alert_job_skips_when_no_targets(monkeypatch, tmp_path):
+    monkeypatch.setenv("FINANCEBRO_DB_PATH", str(tmp_path / "drift_test3.db"))
+    from bot import proactive
+
+    sent = []
+    monkeypatch.setattr(proactive, "DRIFT_ALERT_USER_ID", 42)
+    monkeypatch.setattr(proactive, "get_latest_portfolio_report", lambda user_id: {"report_date": "2026-05-12", "accounts": []})
+    monkeypatch.setattr(proactive, "get_targets", lambda user_id: {})
+    monkeypatch.setattr(proactive, "_send", AsyncMock(side_effect=lambda ctx, uid, text: sent.append(text)))
+
+    context = SimpleNamespace(bot=AsyncMock())
+    await proactive.drift_alert_job(context)
+
+    assert not sent

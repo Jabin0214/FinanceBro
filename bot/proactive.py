@@ -12,6 +12,8 @@ from agent.news_impact import rank_news_by_impact
 from agent.risk_calculator import compute_metrics
 from agent.tools.news import _get_news
 from config import (
+    DRIFT_ALERT_THRESHOLD_PCT,
+    DRIFT_ALERT_USER_ID,
     PROACTIVE_ALERT_PNL_PCT,
     PROACTIVE_ALERT_POSITION_WEIGHT_PCT,
     PROACTIVE_ALERT_USER_ID,
@@ -19,8 +21,10 @@ from config import (
     PROACTIVE_NEWS_USER_ID,
 )
 from bot.triggers import Trigger, record_fire, should_fire
+from agent.rebalancing import compute_rebalancing
+from storage.allocation_store import get_targets
 from ibkr.flex_query import fetch_flex_report
-from storage.portfolio_store import get_net_liquidation_series, save_portfolio_report
+from storage.portfolio_store import get_latest_portfolio_report, get_net_liquidation_series, save_portfolio_report
 
 logger = logging.getLogger(__name__)
 
@@ -34,6 +38,12 @@ _NEWS_MONITOR_TRIGGER = Trigger(
     name="news.monitor",
     cooldown_seconds=4 * 3600,
     max_fires_per_day=4,
+)
+
+_DRIFT_ALERT_TRIGGER = Trigger(
+    name="drift.alert",
+    cooldown_seconds=12 * 3600,
+    max_fires_per_day=2,
 )
 
 
@@ -126,6 +136,93 @@ async def news_monitor_job(context) -> None:
     except Exception:
         logger.exception("news monitor failed")
         await _send(context, user_id, "❌ 新闻与财报提醒检查失败。")
+
+
+async def drift_alert_job(context) -> None:
+    user_id = DRIFT_ALERT_USER_ID
+    if user_id is None:
+        logger.error("drift alert skipped: missing DRIFT_ALERT_USER_ID")
+        return
+
+    try:
+        report = await asyncio.to_thread(get_latest_portfolio_report, user_id)
+        if not report:
+            logger.info("drift alert skipped: no saved portfolio")
+            return
+
+        targets = get_targets(user_id)
+        if not targets:
+            logger.info("drift alert skipped: no targets set")
+            return
+
+        metrics = compute_metrics(report)
+        if "error" in metrics:
+            logger.info("drift alert skipped: %s", metrics["error"])
+            return
+
+        total_nlv = metrics["total_net_liquidation"]
+        # Build current_weights using net_liquidation as denominator so that
+        # drift reflects how each position sits within the total portfolio value
+        # (including cash), matching the semantics of user-defined target allocations.
+        nlv_weights = [
+            {
+                "symbol": pos["symbol"],
+                "weight_pct": round(pos["market_value_base"] / total_nlv * 100, 2)
+                if total_nlv > 0 else 0.0,
+                "market_value_base": pos["market_value_base"],
+            }
+            for pos in metrics["concentration"]
+        ]
+
+        drift_result = compute_rebalancing(
+            current_weights=nlv_weights,
+            targets=targets,
+            total_portfolio_value=total_nlv,
+        )
+        if "error" in drift_result:
+            logger.info("drift alert skipped: %s", drift_result["error"])
+            return
+
+        if drift_result["max_drift_abs_pct"] < DRIFT_ALERT_THRESHOLD_PCT:
+            logger.info(
+                "drift alert skipped: max drift %.1f%% below threshold %.1f%%",
+                drift_result["max_drift_abs_pct"],
+                DRIFT_ALERT_THRESHOLD_PCT,
+            )
+            return
+
+        top_drifts = sorted(
+            drift_result["drift"], key=lambda r: abs(r["drift_pct"]), reverse=True
+        )[:3]
+        key = _fingerprint(user_id, report.get("report_date", ""), str(top_drifts))
+
+        if not should_fire(_DRIFT_ALERT_TRIGGER, user_id=user_id, fingerprint=key):
+            logger.info("drift alert skipped: trigger dedup")
+            return
+
+        lines = []
+        for row in drift_result["drift"]:
+            if row["drift_pct"] > 0:
+                emoji, direction, trade_dir = "🔴", "超配", "卖出"
+            else:
+                emoji, direction, trade_dir = "🟡", "低配", "买入"
+            trade_abs = abs(row["suggested_trade_base"])
+            lines.append(
+                f"{emoji} {row['symbol']}：{direction} {abs(row['drift_pct']):.1f}%"
+                f"（建议{trade_dir} ${trade_abs:,.0f}）"
+            )
+
+        await _send(
+            context,
+            user_id,
+            "<b>仓位偏离预警</b>\n\n"
+            + "\n".join(lines)
+            + f"\n\n最大偏离：{drift_result['max_drift_symbol']} "
+            + f"{drift_result['max_drift_abs_pct']:.1f}%（阈值 {DRIFT_ALERT_THRESHOLD_PCT:.0f}%）",
+        )
+        record_fire(_DRIFT_ALERT_TRIGGER, user_id=user_id, fingerprint=key)
+    except Exception:
+        logger.exception("drift alert job failed")
 
 
 def build_opening_brief(
