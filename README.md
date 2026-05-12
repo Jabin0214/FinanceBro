@@ -43,40 +43,421 @@ FinanceBro 是一个通过 Telegram 使用的私人投资助手，用来分析 I
 
 ## 用户怎么用
 
-在 Telegram 私聊 Bot 发送命令或自然语言。
+在 Telegram 私聊 Bot 发送命令或自然语言。所有命令只在私聊中有效，群聊会被拒绝。
 
-| 命令 | 行为 |
+---
+
+### 命令速查表
+
+| 命令 | 说明 |
 |------|------|
-| `/start` | 显示帮助 |
-| `/report` | 获取 IBKR 持仓 HTML 报告，不走 AI |
-| `/risk` | 直接触发 Risk Analyst Agent |
-| `/news <关键词>` | 直接触发 News Agent，例如 `/news AAPL earnings` |
-| `/brief` | 立即生成一次开盘前简报，包含核心指标、主要持仓和风险提醒 |
-| `/history` | 查看最近 30 天组合复盘 |
+| `/start` | 显示帮助信息 |
+| `/report` | 拉取 IBKR 最新持仓，生成 HTML 报告，不走 AI |
+| `/risk` | 直接触发 Risk Analyst（Grok）对当前组合做风险点评 |
+| `/news <关键词>` | 直接触发 News Agent 搜索新闻，例如 `/news AAPL earnings` |
+| `/brief` | 立即生成开盘前简报，包含净值、NLV 趋势、主要持仓和风险提醒 |
+| `/history` | 查看最近 30 天组合复盘，对比净值 / 持仓 / 现金变化 |
 | `/alerts` | 手动检查持仓浮亏 / 集中度阈值，主要用于临时排查 |
-| `/clear` | 清除当前 Telegram 用户的对话历史 |
+| `/settarget <SYMBOL> <PCT> ...` | 设置目标仓位，支持一次批量输入多个标的 |
+| `/target` | 查看当前已保存的目标仓位配置 |
+| `/clear` | 清除当前用户对话历史，重置对话上下文 |
 
-自然语言也可以直接触发工具：
+---
+
+### 1. 持仓查询
+
+**直接拉报告（不走 AI）：**
+
+```text
+/report
+```
+
+返回当前 IBKR 账户的 HTML 持仓报告，包含各账户汇总、持仓明细、现金、净值（NLV）。适合想快速看数字而不需要 AI 解读时使用。
+
+**通过自然语言查询（AI 汇总分析）：**
 
 ```text
 帮我看看现在持仓怎么样
 ```
 
 ```text
+我现在哪些仓位亏损最多？
+```
+
+```text
+港股和美股各占多少比例？
+```
+
+```text
+现金比例多少？
+```
+
+AI（Claude Sonnet）会实时拉取 IBKR 数据，分析后用自然语言回复。支持追问，上下文跨多轮保留。
+
+---
+
+### 2. 风险分析
+
+**直接触发风险分析（Grok Risk Analyst）：**
+
+```text
+/risk
+```
+
+**通过自然语言触发：**
+
+```text
 这个组合风险高不高？
 ```
 
 ```text
-今天 TSLA 有什么新闻？
+集中度是多少？有没有单一持仓超过 30%？
 ```
+
+```text
+有没有潜在风险需要注意？
+```
+
+风险分析包含：
+- HHI 赫芬达尔指数（集中度量化）
+- 前五大持仓占比
+- 单一持仓超阈值提醒
+- 浮盈 / 浮亏分布
+- Grok 结合实时信息的风险点评
+
+**历史风险指标（基于过去快照序列）：**
+
+```text
+过去 90 天的年化波动率、最大回撤和 Sharpe 是多少？
+```
+
+```text
+帮我看看过去 30 天组合风险，包括 VaR 和 Sortino
+```
+
+```text
+最大回撤是什么时候发生的？
+```
+
+支持窗口：7 天 / 30 天 / 60 天 / 90 天。指标包括：
+- 年化波动率
+- 最大回撤（及发生日期）
+- 历史 VaR 95%（单日最坏亏损估计）
+- CVaR 95%（极端情况平均亏损）
+- Sharpe 比率（无风险利率 2%）
+- Sortino 比率（只惩罚下行波动）
+
+---
+
+### 3. 历史复盘
+
+**查看最近 30 天组合变化：**
+
+```text
+/history
+```
+
+**通过自然语言查询：**
 
 ```text
 过去 30 天我的组合发生了什么变化？
 ```
 
 ```text
-过去 90 天的年化波动率、最大回撤和 Sharpe 是多少？
+上个月净值变动了多少？
 ```
+
+```text
+过去 90 天有哪些持仓新开仓或平仓了？
+```
+
+```text
+过去 7 天浮盈最大的标的是哪个？
+```
+
+复盘内容包括：净值 / 股票市值 / 现金 / 浮盈 / 成本变化，以及开仓、平仓、加仓、减仓事件识别。
+
+---
+
+### 4. 目标仓位与调仓建议
+
+这是 V2 Iteration 2 新增功能，用来管理目标仓位配置、计算当前偏差并获取 AI 调仓建议。
+
+#### 4.1 设置目标仓位
+
+```text
+/settarget AAPL 30 MSFT 20 CASH 10
+```
+
+格式：`/settarget 标的1 百分比1 标的2 百分比2 ...`
+
+- 标的名称不区分大小写（会自动转大写）
+- 百分比是以净值（NLV）为基准的目标占比，单位 `%`
+- 支持 `CASH` 作为现金目标
+- 目标仓位不必加总到 100%（未分配部分视为"自由仓位"）
+- 每次调用 `/settarget` 会**完全替换**已有配置（不是追加）
+
+示例：科技股为主的组合
+
+```text
+/settarget AAPL 25 MSFT 20 NVDA 15 TSLA 10 CASH 10
+```
+
+Bot 回复：
+
+```text
+✅ 目标仓位已保存（5 个标的）
+
+AAPL  25.0%
+MSFT  20.0%
+NVDA  15.0%
+TSLA  10.0%
+CASH  10.0%
+
+合计：80.0%（剩余 20.0% 未分配）
+```
+
+#### 4.2 查看目标仓位
+
+```text
+/target
+```
+
+显示已保存的目标配置和各仓位百分比。未设置过目标时会提示使用 `/settarget`。
+
+#### 4.3 获取调仓建议（AI）
+
+设置目标仓位后，可以直接用自然语言让 AI 计算偏差并给出操作建议：
+
+```text
+我现在哪些标的需要买入或卖出？
+```
+
+```text
+和目标仓位相比，现在偏差最大的是哪个？
+```
+
+```text
+帮我做一下调仓分析，告诉我每个标的的偏差和建议操作金额
+```
+
+```text
+NVDA 现在是超配还是低配？
+```
+
+AI 会综合当前持仓和目标配置，输出每个标的的：
+- 当前权重 vs 目标权重
+- 偏差百分点（正数 = 超配，负数 = 低配）
+- 建议买入 / 卖出金额（以 NLV 为基准）
+
+示例回复（精简）：
+
+```text
+当前组合 vs 目标仓位偏差：
+
+🟡 AAPL：低配 -8.3%  → 建议买入 $12,450
+🔴 NVDA：超配 +5.1%  → 建议卖出 $7,650
+🟡 CASH：低配 -3.2%  → 建议增持 $4,800
+🟢 MSFT：基本持平 +0.4%
+
+最大偏差标的：AAPL -8.3%
+```
+
+> **注意：** FinanceBro 只给建议，不会自动下单。所有交易需在 IBKR 客户端手动执行。
+
+---
+
+### 5. 新闻与财报搜索
+
+**直接搜索：**
+
+```text
+/news TSLA earnings
+```
+
+```text
+/news AAPL 苹果 新产品
+```
+
+**通过自然语言触发：**
+
+```text
+今天 TSLA 有什么新闻？
+```
+
+```text
+NVDA 最近财报情况怎么样？下次财报是什么时候？
+```
+
+```text
+美联储最新政策对我的科技股持仓有什么影响？
+```
+
+新闻 Agent（Grok）同时搜索 Web 和 X（Twitter），返回最相关的近期新闻，并标注来源时间。
+
+---
+
+### 6. 开盘前简报解读
+
+**立即获取简报：**
+
+```text
+/brief
+```
+
+Bot 会实时拉取 IBKR 数据，生成一份包含以下内容的简报：
+
+```text
+📊 开盘前简报
+
+日期：2026-01-15
+净值：$142,358.20
+📉 净值变动：-1,243.00（-0.9%）vs 昨日
+🔴 整体浮动：-3.2%（$-4,682.00）
+
+前五大持仓：71.3% · HHI：1,842
+
+主要持仓
+AAPL 28.1%（浮动 +12.3%）
+NVDA 19.4%（浮动 -5.1%）
+MSFT 15.2%（浮动 +8.7%）
+TSLA 8.6%（浮动 -18.2%）
+CASH 6.8%
+
+风险提醒
+🔴 TSLA 单一持仓占比 8.6%（未触发阈值）
+🟢 未触发浮亏阈值
+```
+
+**关键字段解读：**
+
+| 字段 | 含义 |
+|------|------|
+| `净值（NLV）` | 账户总市值（股票 + 现金） |
+| `净值变动` | 与前一日快照相比的 NLV 变化（📈 正 / 📉 负） |
+| `整体浮动` | 总持仓未实现盈亏 / 总成本 |
+| `HHI` | 赫芬达尔指数，越高表示集中度越高（2500+ 为高度集中） |
+| `前五大持仓 %` | 前五大持仓占 NLV 的合计比例 |
+| `浮动 %（每个标的）` | 该标的的未实现盈亏比例 |
+
+**净值变动（NLV 趋势行）**只有在有两天及以上历史快照时才出现。首次部署当天会缺失该行，第二天起自动显示。
+
+---
+
+### 7. 预警系统
+
+FinanceBro 支持三类预警，全部基于 Telegram 主动推送。
+
+#### 7.1 持仓阈值预警（默认开启）
+
+**触发条件：**
+- 整体浮亏 ≤ -5%（可在 `config.py` 修改）
+- 单一持仓占比 ≥ 35%（可在 `config.py` 修改）
+
+**推送时间：** 每天 08:35（`Pacific/Auckland` 时区）
+
+**手动触发检查：**
+
+```text
+/alerts
+```
+
+**去重规则：** 同一天同一条件触发后，冷却 12 小时才再次推送，每日最多 3 次。
+
+#### 7.2 仓位偏离预警（默认关闭）
+
+偏离预警在当前持仓与目标仓位偏差超过阈值时自动推送。
+
+**启用方式（`.env` 或环境变量）：**
+
+```env
+DRIFT_ALERT_ENABLED=true
+DRIFT_ALERT_THRESHOLD_PCT=10.0
+```
+
+**触发条件：** 任意标的的当前权重与目标权重偏差 ≥ `DRIFT_ALERT_THRESHOLD_PCT`（百分点）
+
+**推送时间：** 每天 09:00
+
+**推送内容示例：**
+
+```text
+📊 仓位偏离预警
+
+🟡 AAPL：低配 8.3%（建议买入 $12,450）
+🔴 NVDA：超配 5.1%（建议卖出 $7,650）
+🟡 CASH：低配 3.2%（建议增持 $4,800）
+
+最大偏离：AAPL 8.3%（阈值 10%）
+```
+
+**去重规则：** 冷却 12 小时，每日最多 2 次。
+
+> 使用偏离预警必须先通过 `/settarget` 设置目标仓位，否则 Bot 会跳过该 job 并记录日志。
+
+#### 7.3 重大新闻 / 财报提醒（默认关闭，实验性）
+
+**启用方式：**
+
+```env
+PROACTIVE_NEWS_ENABLED=true
+```
+
+**触发频率：** 每 180 分钟扫描一次当前持仓的前五大标的
+
+**推送内容：** 相关新闻摘要 + 按"持仓权重 × 新闻极性"排序的前 3 条高影响新闻
+
+**去重规则：** 冷却 4 小时，每日最多 4 次。
+
+---
+
+### 8. 对话示例（多轮）
+
+FinanceBro 支持多轮对话，会记住上下文直到使用 `/clear` 清除。
+
+**示例一：持仓审视 + 调仓决策**
+
+```text
+用户：帮我看看现在持仓
+Bot：[拉取持仓，列出各账户汇总]
+
+用户：NVDA 现在是多少比例？
+Bot：NVDA 当前占 NLV 的 19.4%，是您第二大持仓...
+
+用户：和我的目标配置相比呢？
+Bot：您的目标是 NVDA 15%，当前超配 4.4%，建议卖出约 $6,600...
+
+用户：那 AAPL 呢？
+Bot：AAPL 目标 25%，当前 16.2%，低配 8.8%，建议买入约 $13,200...
+```
+
+**示例二：风险审查 + 历史对比**
+
+```text
+用户：过去 30 天我的组合风险指标是多少？
+Bot：[展示波动率、最大回撤、VaR、Sharpe 等指标]
+
+用户：最大回撤是什么时候发生的？
+Bot：30 天内最大回撤 -4.2%，发生在 12 月 18 日...
+
+用户：那个时候有什么新闻？
+Bot：[搜索 12 月 18 日前后的相关新闻]
+```
+
+**示例三：调仓工作流**
+
+```text
+用户：/settarget AAPL 25 MSFT 20 NVDA 15 CASH 10
+Bot：✅ 目标仓位已保存（4 个标的）
+
+用户：现在哪些标的偏离最大？
+Bot：[调用 get_rebalancing_suggestion，计算偏差]
+
+用户：帮我把这些偏差总结一下，以便我去 IBKR 手动操作
+Bot：[输出结构化操作清单]
+```
+
+---
 
 ---
 
@@ -155,7 +536,7 @@ bot/telegram_bot.py
   v
 bot/handlers.py
   - 私聊 + 白名单鉴权
-  - /report /risk /news /brief /alerts /history /clear
+  - /report /risk /news /brief /alerts /history /settarget /target /clear
   - 普通消息转给 Orchestrator
   |
   v
@@ -171,6 +552,7 @@ agent/orchestrator.py
   +--> agent/tools/news.py          -> Grok web_search + x_search
   +--> agent/tools/risk.py          -> risk_calculator + Grok Risk Analyst
   +--> agent/tools/risk_metrics.py  -> 历史风险指标（波动率 / 回撤 / VaR / Sharpe）
+  +--> agent/tools/rebalancing.py   -> 调仓偏差计算（get_rebalancing_suggestion）
 ```
 
 后台任务：
@@ -179,10 +561,12 @@ agent/orchestrator.py
 bot/scheduler.py
   |
   +--> daily_snapshot_job      每日持仓快照
-  +--> opening_brief_job       开盘前简报
+  +--> opening_brief_job       开盘前简报（含 NLV 趋势行）
   +--> threshold_alert_job     持仓阈值预警（Trigger 去重，冷却 12h）
   +--> news_monitor_job        重大新闻 / 财报提醒轮询（Trigger 去重，冷却 4h）
-                                 └── agent/news_impact.py  新闻影响打分（持仓权重 × 极性）
+  |                              └── agent/news_impact.py  新闻影响打分（持仓权重 × 极性）
+  +--> drift_alert_job         仓位偏离预警（默认关闭，Trigger 去重，冷却 12h）
+                                 └── agent/rebalancing.py  偏差计算引擎
 ```
 
 数据层：
@@ -210,6 +594,7 @@ storage/db.py 表清单
   - position_snapshots       持仓
   - cash_snapshots           现金
   - trigger_fires            主动推送触发记录（去重 / 冷却）
+  - target_allocations       目标仓位配置（user_id + symbol + target_pct）
 ```
 
 ---
@@ -258,7 +643,7 @@ FinanceBro/
 │   ├── risk_calculator.py    实时风险指标（HHI / 集中度 / 盈亏分布）
 │   ├── risk_metrics.py       ★ 历史风险指标（波动率 / 回撤 / VaR / Sharpe）
 │   ├── news_impact.py        ★ 新闻影响打分（持仓权重 × 极性）
-│   ├── rebalancing.py        ★ 调仓偏差引擎（纯 Python，零外部依赖）
+│   ├── rebalancing.py        ★★ 调仓偏差引擎（纯 Python，零外部依赖）
 │   └── tools/
 │       ├── __init__.py       工具注册表
 │       ├── _state.py         当前用户状态
@@ -268,7 +653,7 @@ FinanceBro/
 │       ├── news.py           Grok 新闻搜索
 │       ├── risk.py           Grok 风险分析
 │       ├── risk_metrics.py   ★ 历史风险指标工具
-│       └── rebalancing.py    ★ get_rebalancing_suggestion 工具
+│       └── rebalancing.py    ★★ get_rebalancing_suggestion 工具
 │
 ├── ibkr/
 │   ├── flex_query.py         Flex Web Service 拉取
@@ -281,7 +666,7 @@ FinanceBro/
 │   ├── db.py                 SQLite schema + connect / transaction
 │   ├── memory.py             per-user 对话历史
 │   ├── portfolio_store.py    快照读写 + 历史聚合
-│   └── allocation_store.py   ★ 目标仓位 CRUD（set_targets / get_targets）
+│   └── allocation_store.py   ★★ 目标仓位 CRUD（set_targets / get_targets）
 │
 └── tests/
     ├── agent/                风险指标 / 新闻打分 / 工具单测
@@ -291,7 +676,7 @@ FinanceBro/
     └── storage/              DB schema / 快照读写单测
 ```
 
-> ★ 标记为 V2 Iteration 1 新增文件
+> ★ 标记为 V2 Iteration 1 新增文件；★★ 标记为 V2 Iteration 2 新增文件
 
 ---
 
@@ -426,7 +811,7 @@ docker compose logs --tail=50
 
 ## 测试与验证
 
-当前：**90 个测试，0 个失败**
+当前：**112 个测试，0 个失败**
 
 ```bash
 pytest -q
