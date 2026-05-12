@@ -4,12 +4,16 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from datetime import time
 
 from config import (
+    APP_TIMEZONE,
     DAILY_SNAPSHOT_ENABLED,
     DAILY_SNAPSHOT_NOTIFY,
     DAILY_SNAPSHOT_TIME,
     DAILY_SNAPSHOT_USER_ID,
+    DRIFT_ALERT_ENABLED,
+    DRIFT_ALERT_USER_ID,
     PROACTIVE_ALERT_ENABLED,
     PROACTIVE_ALERT_TIME,
     PROACTIVE_ALERT_USER_ID,
@@ -20,7 +24,7 @@ from config import (
     PROACTIVE_NEWS_INTERVAL_MINUTES,
     PROACTIVE_NEWS_USER_ID,
 )
-from bot.proactive import news_monitor_job, opening_brief_job, threshold_alert_job
+from bot.proactive import drift_alert_job, news_monitor_job, opening_brief_job, threshold_alert_job
 from ibkr.flex_query import fetch_flex_report
 from storage.portfolio_store import save_portfolio_report
 
@@ -28,7 +32,7 @@ logger = logging.getLogger(__name__)
 
 
 def setup_jobs(app) -> None:
-    if not any([DAILY_SNAPSHOT_ENABLED, PROACTIVE_BRIEF_ENABLED, PROACTIVE_ALERT_ENABLED, PROACTIVE_NEWS_ENABLED]):
+    if not any([DAILY_SNAPSHOT_ENABLED, PROACTIVE_BRIEF_ENABLED, PROACTIVE_ALERT_ENABLED, PROACTIVE_NEWS_ENABLED, DRIFT_ALERT_ENABLED]):
         logger.info("scheduled jobs disabled")
         return
 
@@ -77,6 +81,16 @@ def setup_jobs(app) -> None:
             name="news_and_earnings_monitor",
         )
         logger.info("news and earnings monitor scheduled every %s minutes", PROACTIVE_NEWS_INTERVAL_MINUTES)
+
+    if DRIFT_ALERT_ENABLED:
+        if DRIFT_ALERT_USER_ID is None:
+            raise RuntimeError("DRIFT_ALERT_USER_ID is required when drift alerts are enabled")
+        app.job_queue.run_daily(
+            drift_alert_job,
+            time=time(9, 0, tzinfo=APP_TIMEZONE),
+            name="drift_alert",
+        )
+        logger.info("drift alert job scheduled daily at 09:00")
 
 
 async def daily_snapshot_job(context) -> None:

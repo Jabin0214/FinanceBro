@@ -33,6 +33,12 @@ FinanceBro 是一个通过 Telegram 使用的私人投资助手，用来分析 I
 - **持久化触发去重**：新建 `bot/triggers.py` + `trigger_files` 表，阈值预警和新闻监控的去重状态写入 SQLite，重启不丢
 - **新闻影响排序**：`agent/news_impact.py` 对新闻按"持仓权重 × 关键词极性"打分，开盘前新闻推送优先展示高影响条目
 
+### V2 Iteration 2（已落地）
+- **目标仓位管理**：`/settarget` 存储目标配置，`get_rebalancing_suggestion` 工具分析偏差
+- **调仓建议**：AI 可回答"当前哪些标的需要买入/卖出"
+- **开盘简报增强**：加入昨日净值变动趋势行（📈/📉）
+- **仓位偏离预警**：持仓偏离目标超阈值时自动推送（`DRIFT_ALERT_ENABLED=true`）
+
 ---
 
 ## 用户怎么用
@@ -124,6 +130,8 @@ docker compose logs -f
 - 阈值预警触发冷却：`12 小时`，每日上限 `3 次`
 - 新闻监控触发冷却：`4 小时`，每日上限 `4 次`
 - 新闻 / 财报轮询间隔：`180` 分钟，默认关闭，建议只在需要主动监控时开启
+- `DRIFT_ALERT_ENABLED`：仓位偏离预警开关（默认 false）
+- `DRIFT_ALERT_THRESHOLD_PCT`：触发预警的最大偏离阈值，单位百分点（默认 10.0）
 
 安全原则：
 
@@ -250,6 +258,7 @@ FinanceBro/
 │   ├── risk_calculator.py    实时风险指标（HHI / 集中度 / 盈亏分布）
 │   ├── risk_metrics.py       ★ 历史风险指标（波动率 / 回撤 / VaR / Sharpe）
 │   ├── news_impact.py        ★ 新闻影响打分（持仓权重 × 极性）
+│   ├── rebalancing.py        ★ 调仓偏差引擎（纯 Python，零外部依赖）
 │   └── tools/
 │       ├── __init__.py       工具注册表
 │       ├── _state.py         当前用户状态
@@ -258,7 +267,8 @@ FinanceBro/
 │       ├── report.py         HTML 报告
 │       ├── news.py           Grok 新闻搜索
 │       ├── risk.py           Grok 风险分析
-│       └── risk_metrics.py   ★ 历史风险指标工具
+│       ├── risk_metrics.py   ★ 历史风险指标工具
+│       └── rebalancing.py    ★ get_rebalancing_suggestion 工具
 │
 ├── ibkr/
 │   ├── flex_query.py         Flex Web Service 拉取
@@ -270,7 +280,8 @@ FinanceBro/
 ├── storage/
 │   ├── db.py                 SQLite schema + connect / transaction
 │   ├── memory.py             per-user 对话历史
-│   └── portfolio_store.py    快照读写 + 历史聚合
+│   ├── portfolio_store.py    快照读写 + 历史聚合
+│   └── allocation_store.py   ★ 目标仓位 CRUD（set_targets / get_targets）
 │
 └── tests/
     ├── agent/                风险指标 / 新闻打分 / 工具单测
@@ -573,7 +584,7 @@ V2 目标：从"问答式账户助手"升级成"长期投资工作台"，重点�
 | 1 | Portfolio Historian Agent | ✅ 工具版已完成，可按需升级为 Specialist |
 | 2 | Earnings Calendar Agent | 🔜 待开发 |
 | 3 | Trade Journal Agent | 🔜 待开发 |
-| 4 | Risk Sentinel Agent | 🔜 待开发（基础 Trigger 已就绪） |
+| 4 | Risk Sentinel Agent | 🔜 待开发（Trigger + Drift 基础设施已就绪） |
 | 5 | Macro Regime Agent | 🔜 待开发 |
 | 6 | Rebalancing Agent | 🔜 待开发 |
 | 7 | Watchlist Scout Agent | 🔜 待开发 |
