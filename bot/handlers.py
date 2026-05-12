@@ -357,7 +357,7 @@ async def cmd_target(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
         f"<code>{sym:<8}</code>{pct:.1f}%" for sym, pct in sorted(targets.items())
     )
     await send_html_with_fallback(
-        update,
+        update.message,
         "<b>目标仓位</b>\n\n"
         + lines
         + f"\n{'—' * 14}\n"
