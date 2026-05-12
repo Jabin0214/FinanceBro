@@ -55,9 +55,13 @@ def compute_rebalancing(
     for symbol, target_pct in sorted(targets.items()):
         sym_upper = symbol.upper()
         current_pct = current_by_symbol.get(sym_upper, 0.0)
-        drift = round(current_pct - target_pct, 2)
+        drift_raw = current_pct - target_pct
+        drift = round(drift_raw, 2)
         # A positive drift means overweight → suggested trade is negative (sell)
-        trade_value = round(-drift / 100.0 * total_portfolio_value, 2)
+        # Use drift_raw for trade calculation to preserve precision
+        trade_value = round(-drift_raw / 100.0 * total_portfolio_value, 2)
+        # Normalize -0.0 to 0.0 to avoid JSON serialization issues
+        trade_value = trade_value if trade_value != 0.0 else 0.0
         drift_rows.append({
             "symbol": sym_upper,
             "target_pct": round(float(target_pct), 2),
