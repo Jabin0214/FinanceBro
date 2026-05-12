@@ -157,6 +157,21 @@ def get_position_history(user_id: int, symbol: str, limit: int = 30) -> list[dic
     return [dict(row) for row in rows]
 
 
+def get_latest_portfolio_report(user_id: int) -> dict | None:
+    """Return the most recently saved raw portfolio report dict for user, or None."""
+    with db.connect() as conn:
+        row = conn.execute(
+            """
+            select payload_json from raw_reports
+            where user_id = ?
+            order by report_date desc, id desc
+            limit 1
+            """,
+            (user_id,),
+        ).fetchone()
+    return json.loads(row["payload_json"]) if row else None
+
+
 def _normalize_history_days(days: int) -> int:
     return days if days in {7, 30, 90} else 30
 

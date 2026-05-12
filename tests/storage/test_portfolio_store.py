@@ -172,3 +172,23 @@ def test_get_net_liquidation_series_empty_db_returns_empty(tmp_path, monkeypatch
     monkeypatch.setenv("FINANCEBRO_DB_PATH", str(tmp_path / "test.db"))
     from storage.portfolio_store import get_net_liquidation_series
     assert get_net_liquidation_series(999, days=30) == []
+
+
+def test_get_latest_portfolio_report_returns_saved_report(tmp_path, monkeypatch):
+    monkeypatch.setenv("FINANCEBRO_DB_PATH", str(tmp_path / "financebro.db"))
+    from storage.portfolio_store import get_latest_portfolio_report, save_portfolio_report
+
+    report = _sample_report()
+    save_portfolio_report(42, report)
+
+    result = get_latest_portfolio_report(42)
+    assert result is not None
+    assert result["report_date"] == report["report_date"]
+    assert len(result["accounts"]) == 1
+
+
+def test_get_latest_portfolio_report_returns_none_when_empty(tmp_path, monkeypatch):
+    monkeypatch.setenv("FINANCEBRO_DB_PATH", str(tmp_path / "financebro.db"))
+    from storage.portfolio_store import get_latest_portfolio_report
+
+    assert get_latest_portfolio_report(999) is None
